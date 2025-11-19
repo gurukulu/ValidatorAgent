@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Enhanced Feature Mapper with LangChain and AWS Bedrock.
+Enhanced Feature Mapper with AWS Bedrock.
 
 This script evaluates feature mappings using:
 1. Vector similarity scores (from Pinecone or similar)
-2. LLM semantic evaluation (via AWS Bedrock + LangChain)
+2. LLM semantic evaluation (via AWS Bedrock)
 
 Key Strategy:
 - Candidates with similarity_score ≥ threshold → Auto-accept (no LLM call)
@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import boto3
-from langchain_aws import ChatBedrock
 from pydantic import ValidationError
 
 from enhanced_models import (
@@ -82,12 +81,12 @@ def setup_logging(level: int = logging.INFO) -> logging.Logger:
 
 
 # ============================================================================
-# LANGCHAIN FEATURE MAPPER
+# BEDROCK FEATURE MAPPER
 # ============================================================================
 
-class LangChainFeatureMapper:
+class BedrockFeatureMapper:
     """
-    Feature mapper using LangChain + AWS Bedrock for semantic evaluation.
+    Feature mapper using AWS Bedrock for semantic evaluation.
 
     Architecture:
     1. Split candidates by similarity threshold
@@ -116,7 +115,7 @@ class LangChainFeatureMapper:
         log_level: int = logging.INFO,
     ):
         """
-        Initialize the LangChain Feature Mapper.
+        Initialize the Bedrock Feature Mapper.
 
         Args:
             aws_region: AWS region for Bedrock (default: eu-central-1)
@@ -152,7 +151,7 @@ class LangChainFeatureMapper:
         }
 
         self.logger.info("=" * 80)
-        self.logger.info("🚀 LangChain Feature Mapper Initialized")
+        self.logger.info("🚀 Bedrock Feature Mapper Initialized")
         self.logger.info("=" * 80)
         self.logger.info(f"📍 AWS Region: {self.aws_region}")
         self.logger.info(f"🤖 Model: {self.model_id}")
@@ -165,42 +164,108 @@ class LangChainFeatureMapper:
                         f"Reject={self.quality_thresholds.reject}")
         self.logger.info("=" * 80)
 
-        # Initialize LangChain with Bedrock
-        self._initialize_langchain()
+        # Initialize AWS Bedrock client
+        self._initialize_bedrock()
 
-    def _initialize_langchain(self) -> None:
-        """Initialize LangChain with AWS Bedrock backend."""
+    def _initialize_bedrock(self) -> None:
+        """Initialize AWS Bedrock client."""
         try:
-            self.logger.info("🔧 Initializing LangChain with AWS Bedrock...")
+            self.logger.info("🔧 Initializing AWS Bedrock client...")
 
-            # Create Bedrock client using AWS config credentials
-            bedrock_client = boto3.client(
+            # Create Bedrock runtime client using AWS config credentials
+            self.bedrock_client = boto3.client(
                 service_name="bedrock-runtime",
                 region_name=self.aws_region,
             )
 
-            # Create LangChain ChatBedrock instance
-            self.llm = ChatBedrock(
-                client=bedrock_client,
-                model_id=self.model_id,
-                model_kwargs={
-                    "temperature": 0.1,  # Low temperature for consistent evaluation
-                    "top_p": 0.9,
-                    "max_tokens": 1000,
-                },
-            )
+            # Model configuration
+            self.model_config = {
+                "temperature": 0.1,  # Low temperature for consistent evaluation
+                "top_p": 0.9,
+                "max_tokens": 4000,  # Increased for batch evaluations
+            }
 
-            # Create structured output LLM for single candidate evaluation
-            self.structured_llm = self.llm.with_structured_output(CandidateEvaluation)
-
-            # Create structured output LLM for batch evaluation
-            self.batch_structured_llm = self.llm.with_structured_output(BatchEvaluationResult)
-
-            self.logger.info("✅ LangChain initialized successfully")
+            self.logger.info("✅ AWS Bedrock client initialized successfully")
 
         except Exception as e:
-            self.logger.error(f"❌ Failed to initialize LangChain: {e}")
+            self.logger.error(f"❌ Failed to initialize AWS Bedrock client: {e}")
             raise
+
+    def _invoke_bedrock(self, prompt: str) -> str:
+        """
+        Invoke AWS Bedrock with a prompt and return the response text.
+
+        Args:
+            prompt: The prompt to send to the model
+
+        Returns:
+            Response text from the model
+
+        Raises:
+            Exception: If the API call fails
+        """
+        # Prepare request body for Claude models
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": self.model_config["max_tokens"],
+            "temperature": self.model_config["temperature"],
+            "top_p": self.model_config["top_p"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        }
+
+        # Invoke the model
+        response = self.bedrock_client.invoke_model(
+            modelId=self.model_id,
+            body=json.dumps(request_body)
+        )
+
+        # Parse response
+        response_body = json.loads(response['body'].read())
+
+        # Extract text from Claude response format
+        if 'content' in response_body and len(response_body['content']) > 0:
+            return response_body['content'][0]['text']
+        else:
+            raise ValueError("Unexpected response format from Bedrock")
+
+    def _parse_json_response(self, response_text: str) -> Dict[str, Any]:
+        """
+        Extract and parse JSON from LLM response.
+
+        The LLM might wrap JSON in markdown code blocks or add explanatory text.
+        This method extracts the JSON and parses it.
+
+        Args:
+            response_text: Raw response text from LLM
+
+        Returns:
+            Parsed JSON as dictionary
+
+        Raises:
+            ValueError: If JSON cannot be extracted or parsed
+        """
+        # Try to find JSON in code blocks first
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # Try to find raw JSON (starts with { and ends with })
+            json_match = re.search(r'(\{.*\})', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # Assume the entire response is JSON
+                json_str = response_text.strip()
+
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse JSON from response: {e}\nResponse: {response_text[:200]}")
 
     def _extract_oem_from_car_model(self, car_model: Optional[str]) -> str:
         """
@@ -294,10 +359,14 @@ OEM: {candidate.oem}
 - Base your score purely on semantic relationships
 - Provide clear reasoning for your score
 
-Evaluate the candidate and provide:
-1. A context_matching_score (0-100)
-2. Clear reasoning for your score
-3. Key factors that influenced your decision (1-5 factors)
+Evaluate the candidate and provide your response as a JSON object with this exact structure:
+{{
+  "context_matching_score": <integer 0-100>,
+  "reasoning": "<your reasoning here>",
+  "key_factors": ["factor1", "factor2", ...]
+}}
+
+Provide ONLY the JSON object, no additional text or formatting.
 """
         return prompt
 
@@ -360,12 +429,25 @@ Name: {target_feature_name}
 - Base your scores purely on semantic relationships with the TARGET
 - Provide clear reasoning for each candidate's score
 
-Evaluate ALL {len(candidates)} candidates and provide for EACH:
-1. A context_matching_score (0-100)
-2. Clear reasoning for the score
-3. Key factors that influenced your decision (1-5 factors)
+Evaluate ALL {len(candidates)} candidates and provide your response as a JSON object with this exact structure:
+{{
+  "evaluations": [
+    {{
+      "context_matching_score": <integer 0-100>,
+      "reasoning": "<reasoning for candidate 1>",
+      "key_factors": ["factor1", "factor2", ...]
+    }},
+    {{
+      "context_matching_score": <integer 0-100>,
+      "reasoning": "<reasoning for candidate 2>",
+      "key_factors": ["factor1", "factor2", ...]
+    }}
+    // ... one evaluation object per candidate
+  ]
+}}
 
-Return the evaluations in the SAME ORDER as the candidates (Candidate 1, 2, 3, etc.).
+CRITICAL: Return evaluations in the SAME ORDER as the candidates (Candidate 1, 2, 3, etc.).
+Provide ONLY the JSON object, no additional text or formatting.
 """
         return prompt
 
@@ -395,13 +477,19 @@ Return the evaluations in the SAME ORDER as the candidates (Candidate 1, 2, 3, e
             try:
                 self.logger.debug(f"🔄 LLM evaluation attempt {attempt + 1}/{max_retries}")
 
-                # Invoke LLM with structured output
-                response: CandidateEvaluation = self.structured_llm.invoke(prompt)
+                # Invoke Bedrock
+                response_text = self._invoke_bedrock(prompt)
+
+                # Parse JSON response
+                response_data = self._parse_json_response(response_text)
+
+                # Validate with Pydantic
+                evaluation = CandidateEvaluation(**response_data)
 
                 self.stats["llm_calls"] += 1
 
-                self.logger.debug(f"✅ LLM returned score: {response.context_matching_score}")
-                return response
+                self.logger.debug(f"✅ LLM returned score: {evaluation.context_matching_score}")
+                return evaluation
 
             except ValidationError as e:
                 self.logger.warning(f"⚠️ Validation error on attempt {attempt + 1}: {e}")
@@ -464,23 +552,29 @@ Return the evaluations in the SAME ORDER as the candidates (Candidate 1, 2, 3, e
                     f"for {len(candidates)} candidates"
                 )
 
-                # Invoke LLM with structured output for batch
-                response: BatchEvaluationResult = self.batch_structured_llm.invoke(prompt)
+                # Invoke Bedrock
+                response_text = self._invoke_bedrock(prompt)
+
+                # Parse JSON response
+                response_data = self._parse_json_response(response_text)
+
+                # Validate with Pydantic
+                batch_result = BatchEvaluationResult(**response_data)
 
                 # Validate that we got the right number of evaluations
-                if len(response.evaluations) != len(candidates):
+                if len(batch_result.evaluations) != len(candidates):
                     raise ValueError(
                         f"Expected {len(candidates)} evaluations, "
-                        f"got {len(response.evaluations)}"
+                        f"got {len(batch_result.evaluations)}"
                     )
 
                 self.stats["batch_llm_calls"] += 1
                 self.stats["llm_calls"] += 1
 
                 self.logger.debug(
-                    f"✅ Batch LLM returned {len(response.evaluations)} evaluations"
+                    f"✅ Batch LLM returned {len(batch_result.evaluations)} evaluations"
                 )
-                return response.evaluations
+                return batch_result.evaluations
 
             except ValidationError as e:
                 self.logger.warning(
@@ -942,7 +1036,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Enhanced Feature Mapper with LLM Semantic Evaluation",
+        description="Enhanced Feature Mapper with AWS Bedrock LLM Semantic Evaluation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1039,7 +1133,7 @@ Examples:
             input_data = json.load(f)
 
         # Initialize mapper
-        mapper = LangChainFeatureMapper(
+        mapper = BedrockFeatureMapper(
             aws_region=args.region,
             model_id=args.model,
             similarity_threshold=args.threshold,
