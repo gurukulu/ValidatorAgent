@@ -192,7 +192,57 @@ print(f"Excellent: {result.EvaluationSummary.features_with_excellent_matches}")
 print(f"Review needed: {len(result.FeaturesRequiringReview)}")
 ```
 
-## Input Format
+## Input Formats
+
+The system supports **two input formats** and automatically detects which one you're using:
+
+### Format 1: Agent Wrapper Format (NEW)
+
+Recommended for production pipelines with execution tracking:
+
+```json
+{
+  "ExecutionID": "CMI-B22_2025-11-17T11:07:10.227850",
+  "RequestID": "CMI-B22",
+  "Timestamp": "2025-11-17T11:49:57.309311",
+  "AgentInterimOutput": [
+    {
+      "Feature_Name": "Engine Capacity (cc)",
+      "Feature_Group": "SPECIFICATIONS - TECHNICAL",
+      "Uniq_Ref_No": "6",
+      "mapped_list": [
+        {
+          "Type": "Keyword",
+          "sourcetext_featureid": "BMW-6-keyword-1+...",
+          "extracted_feature_id": "ca8cf82e-6b5e-4855-b158-9f6184996176",
+          "similarity_score": 0.841984391,
+          "metadata": {
+            "feature_name": "Engine Displacement",
+            "feature_value": "2993 cm³",
+            "notes": "",
+            "car_model": "BMW X5 xDrive30d",
+            "agent_type": "WebFeatureExtractorAgent",
+            "confidence": "100",
+            "document_name": "BMW X5 xDrive30d.json",
+            "package_type": "Standard feature",
+            "source": "Configurator"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Key features:**
+- Preserves ExecutionID, RequestID, and Timestamp
+- Supports Feature_Group and Uniq_Ref_No
+- Includes Type, sourcetext_featureid, extracted_feature_id
+- Extended metadata fields (agent_type, document_name, origin, etc.)
+
+### Format 2: Simple List Format (Legacy)
+
+For quick testing or simple use cases:
 
 ```json
 [
@@ -201,14 +251,11 @@ print(f"Review needed: {len(result.FeaturesRequiringReview)}")
     "mapped_list": [
       {
         "similarity_score": 0.842,
-        "confidence": 0.91,
         "metadata": {
           "feature_name": "Engine Displacement",
           "feature_value": "Total volume of all engine cylinders",
           "notes": "Measured in cubic centimeters (cc) or liters",
-          "car_model": "BMW 3 Series",
-          "package_type": "Technical Specifications",
-          "source": "manufacturer_datasheet"
+          "car_model": "BMW 3 Series"
         }
       }
     ]
@@ -216,9 +263,60 @@ print(f"Review needed: {len(result.FeaturesRequiringReview)}")
 ]
 ```
 
-## Output Format
+**The system automatically detects the format** - no configuration needed!
 
-Enhanced output preserves ALL original data and adds new fields:
+## Output Formats
+
+The output format matches the input format automatically.
+
+### Output for Agent Wrapper Format
+
+When input uses the wrapper format, output preserves ExecutionID, RequestID, and Timestamp:
+
+```json
+{
+  "ExecutionID": "CMI-B22_2025-11-17T11:07:10.227850",
+  "RequestID": "CMI-B22",
+  "Timestamp": "2025-11-17T11:49:57.309311",
+  "AgentInterimOutput": [
+    {
+      "Feature_Name": "Engine Capacity (cc)",
+      "Feature_Group": "SPECIFICATIONS - TECHNICAL",
+      "Uniq_Ref_No": "6",
+      "mapped_list": [
+        {
+          // ORIGINAL fields (preserved)
+          "Type": "Keyword",
+          "sourcetext_featureid": "...",
+          "extracted_feature_id": "...",
+          "similarity_score": 0.84,
+          "metadata": {...},
+
+          // NEW fields (added by LLM)
+          "context_matching_score": 95,
+          "match_quality": "excellent",
+          "evaluated": true,
+          "llm_reasoning": "Perfect semantic match..."
+        }
+      ],
+      "best_match_index": 0,
+      "best_match_score": 95,
+      "best_match_type": "context"
+    }
+  ],
+  "EvaluationSummary": {
+    "total_features": 1,
+    "candidates_evaluated": 1,
+    "features_with_excellent_matches": 1,
+    "estimated_cost_usd": 0.0003
+  },
+  "FeaturesRequiringReview": []
+}
+```
+
+### Output for Simple List Format
+
+When input uses the simple list format:
 
 ```json
 {
@@ -229,44 +327,30 @@ Enhanced output preserves ALL original data and adds new fields:
         {
           // ORIGINAL (preserved)
           "similarity_score": 0.842,
-          "confidence": 0.91,
-          "metadata": {...},
-
-          // NEW (added by LLM)
-          "context_matching_score": null,
-          "match_quality": "not_evaluated",
-          "evaluated": false,
-          "llm_reasoning": "High similarity (0.842) - auto-accepted without LLM evaluation"
-        },
-        {
-          // ORIGINAL (preserved)
-          "similarity_score": 0.65,
           "metadata": {...},
 
           // NEW (added by LLM)
           "context_matching_score": 98,
           "match_quality": "excellent",
           "evaluated": true,
-          "llm_reasoning": "Perfect semantic match - same concept with different unit notation"
+          "llm_reasoning": "Perfect semantic match"
         }
       ],
-      "best_match_index": 1,
+      "best_match_index": 0,
       "best_match_score": 98,
       "best_match_type": "context"
     }
   ],
-  "EvaluationSummary": {
-    "total_features": 1,
-    "total_candidates": 2,
-    "candidates_evaluated": 1,
-    "candidates_auto_accepted": 1,
-    "features_with_excellent_matches": 1,
-    "estimated_llm_calls": 1,
-    "estimated_cost_usd": 0.0003
-  },
+  "EvaluationSummary": {...},
   "FeaturesRequiringReview": []
 }
 ```
+
+**All NEW fields added to each candidate:**
+- `context_matching_score` (0-100): LLM semantic score
+- `match_quality`: excellent | good | needs_review | poor | not_evaluated
+- `evaluated`: true if LLM evaluated, false if auto-accepted
+- `llm_reasoning`: Explanation for the score
 
 ## Configuration
 

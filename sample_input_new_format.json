@@ -1,0 +1,205 @@
+{
+    "ExecutionID": "CMI-B22_2025-11-17T11:07:10.227850",
+    "RequestID": "CMI-B22",
+    "Timestamp": "2025-11-17T11:49:57.309311",
+    "AgentInterimOutput": [
+        {
+            "Feature_Name": "Engine Capacity (cc)",
+            "Feature_Group": "SPECIFICATIONS - TECHNICAL",
+            "Uniq_Ref_No": "6",
+            "mapped_list": [
+                {
+                    "Type": "Keyword",
+                    "sourcetext_featureid": "BMW-6-keyword-1+Keyword:Engine Displacement | Domain: automotive | Brand: BMW",
+                    "extracted_feature_id": "ca8cf82e-6b5e-4855-b158-9f6184996176",
+                    "similarity_score": 0.841984391,
+                    "metadata": {
+                        "agent_type": "WebFeatureExtractorAgent",
+                        "car_model": "BMW X5 xDrive30d",
+                        "confidence": "100",
+                        "document_name": "BMW X5 xDrive30d.json",
+                        "embedding_type": "feature_name",
+                        "feature_name": "Engine Displacement",
+                        "feature_value": "2993 cm³",
+                        "notes": "",
+                        "origin": "DynamicConfigurator",
+                        "package_type": "Standard feature",
+                        "page_number": "None",
+                        "price": "0",
+                        "request_id": "CMI-B22",
+                        "source": "Configurator",
+                        "timestamp": "2025-11-17T11:48:19.510799"
+                    }
+                },
+                {
+                    "Type": "Keyword",
+                    "sourcetext_featureid": "BMW-6-keyword-2+Keyword:Displacement | Domain: automotive | Brand: BMW",
+                    "extracted_feature_id": "2f18bc92-61c6-40f4-bdb2-4d5c6b038930",
+                    "similarity_score": 0.791585803,
+                    "metadata": {
+                        "agent_type": "WebFeatureExtractorAgent",
+                        "car_model": "BMW X5 xDrive30d",
+                        "confidence": "90",
+                        "document_name": "BMW X5 xDrive30d.json",
+                        "embedding_type": "feature_name",
+                        "feature_name": "BMW Maps",
+                        "feature_value": "With traffic information",
+                        "notes": "Part of Connected Package Professional",
+                        "origin": "DynamicConfigurator",
+                        "package_type": "Packaged feature",
+                        "page_number": "None",
+                        "price": "0",
+                        "request_id": "CMI-B22",
+                        "source": "Configurator",
+                        "timestamp": "2025-11-17T11:48:26.362665"
+                    }
+                },
+                {
+                    "Type": "Keyword",
+                    "sourcetext_featureid": "BMW-6-keyword-1+Keyword:Engine Displacement | Domain: automotive | Brand: BMW",
+                    "extracted_feature_id": "b23500f0-edcf-4b81-bee6-9d90b2e3c006",
+                    "similarity_score": 0.783646524,
+                    "metadata": {
+                        "agent_type": "FeatureExtractorAgent",
+                        "car_model": "BMW X5 xDrive30d",
+                        "confidence": "95",
+                        "document_name": "BMW X5 xDrive30d_PriceList.pdf",
+                        "embedding_type": "feature_name",
+                        "feature_name": "Cylinder/Displacement",
+                        "feature_value": "6/2.993 cm³",
+                        "notes": "",
+                        "origin": "Pricelist",
+                        "package_type": "Standard feature",
+                        "page_number": "None",
+                        "price": "N/A",
+                        "request_id": "CMI-B22",
+                        "source": "Vehicle price list",
+                        "timestamp": "2025-11-17T11:48:35.968451"
+                    }
+                },
+                {
+                    "Type": "FeatureName",
+                    "sourcetext_featureid": "BMW-6-featurename-1+Feature_name:Engine Capacity (cc) | Domain: automotive | Brand: BMW",
+                    "extracted_feature_id": "1d1230b4-5c0d-41f4-8ff8-279e5c24fd2c",
+                    "similarity_score": 0.713023067,
+                    "metadata": {
+                        "agent_type": "WebFeatureExtractorAgent",
+                        "car_model": "BMW X5 xDrive30d",
+                        "confidence": "95",
+                        "document_name": "BMW X5 xDrive30d.json",
+                        "embedding_type": "feature_name",
+                        "feature_name": "Fuel Tank Capacity",
+                        "feature_value": "80 Liter",
+                        "notes": "None",
+                        "origin": "DynamicConfigurator",
+                        "package_type": "Standard feature",
+                        "page_number": "None",
+                        "price": "0",
+                        "request_id": "CMI-B22",
+                        "source": "Configurator",
+                        "timestamp": "2025-11-17T11:48:19.510852"
+                    }
+                }
+            ]
+        },
+        {
+            "Feature_Name": "Power ps (hp)",
+            "Feature_Group": "SPECIFICATIONS - TECHNICAL",
+            "Uniq_Ref_No": "7",
+            "mapped_list": [
+                {
+                    "Type": "Keyword",
+                    "sourcetext_featureid": "BMW-7-keyword-2+Keyword:Maximum Power | Domain: automotive | Brand: BMW",
+                    "extracted_feature_id": "f4671bd4-3cf1-46e4-a61a-02d8fb8ce85b",
+                    "similarity_score": 0.852592885,
+                    "metadata": {
+                        "agent_type": "FeatureExtractorAgent",
+                        "car_model": "BMW X5 xDrive30d",
+                        "confidence": "90",
+                        "document_name": "bmw_configurated_summary_20251117_110821.pdf",
+                        "embedding_type": "feature_name",
+                        "feature_name": "Maximum Power",
+                        "feature_value": "219 kW (298 PS)",
+                        "notes": "From powertrain technical specifications",
+                        "origin": "ConfiguratorSummary",
+                        "package_type": "Standard feature",
+                        "page_number": "None",
+                        "price": "N/A",
+                        "request_id": "CMI-B22",
+                        "source": "Technical Data section",
+                        "timestamp": "2025-11-17T11:48:14.174569"
+                    }
+                },
+                {
+                    "Type": "Keyword",
+                    "sourcetext_featureid": "BMW-7-keyword-1+Keyword:Power Output | Domain: automotive | Brand: BMW",
+                    "extracted_feature_id": "fda29efe-e006-44e8-9899-63b7c7d1e100",
+                    "similarity_score": 0.840480864,
+                    "metadata": {
+                        "agent_type": "FeatureExtractorAgent",
+                        "car_model": "BMW X5 xDrive30d",
+                        "confidence": "90",
+                        "document_name": "BMW X5 xDrive30d_PriceList.pdf",
+                        "embedding_type": "feature_name",
+                        "feature_name": "Power Output",
+                        "feature_value": "219 PS (298 HP)",
+                        "notes": "Power output for smaller diesel model",
+                        "origin": "Pricelist",
+                        "package_type": "Standard feature",
+                        "page_number": "None",
+                        "price": "N/A",
+                        "request_id": "CMI-B22",
+                        "source": "Vehicle specifications table",
+                        "timestamp": "2025-11-17T11:48:33.035193"
+                    }
+                },
+                {
+                    "Type": "Keyword",
+                    "sourcetext_featureid": "BMW-7-keyword-2+Keyword:Maximum Power | Domain: automotive | Brand: BMW",
+                    "extracted_feature_id": "79afe136-a29f-4279-838a-c8811163495a",
+                    "similarity_score": 0.820731461,
+                    "metadata": {
+                        "agent_type": "WebFeatureExtractorAgent",
+                        "car_model": "BMW X5 xDrive30d",
+                        "confidence": "95",
+                        "document_name": "BMW X5 xDrive30d.json",
+                        "embedding_type": "feature_name",
+                        "feature_name": "Max. Power",
+                        "feature_value": "219 kW (298 PS)",
+                        "notes": "",
+                        "origin": "DynamicConfigurator",
+                        "package_type": "Standard feature",
+                        "page_number": "None",
+                        "price": "0",
+                        "request_id": "CMI-B22",
+                        "source": "Configurator",
+                        "timestamp": "2025-11-17T11:48:19.510778"
+                    }
+                },
+                {
+                    "Type": "Keyword",
+                    "sourcetext_featureid": "BMW-7-keyword-2+Keyword:Maximum Power | Domain: automotive | Brand: BMW",
+                    "extracted_feature_id": "bfdff19a-88d4-46ad-a30c-ae70c7b7bc68",
+                    "similarity_score": 0.790631592,
+                    "metadata": {
+                        "agent_type": "WebFeatureExtractorAgent",
+                        "car_model": "BMW X5 xDrive30d",
+                        "confidence": "100",
+                        "document_name": "BMW X5 xDrive30d.json",
+                        "embedding_type": "feature_name",
+                        "feature_name": "Maximum Torque",
+                        "feature_value": "670 Nm",
+                        "notes": "",
+                        "origin": "DynamicConfigurator",
+                        "package_type": "Standard feature",
+                        "page_number": "None",
+                        "price": "0",
+                        "request_id": "CMI-B22",
+                        "source": "Configurator",
+                        "timestamp": "2025-11-17T11:48:19.510806"
+                    }
+                }
+            ]
+        }
+    ]
+}

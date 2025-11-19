@@ -25,22 +25,35 @@ class CandidateMetadata(BaseModel):
     """Metadata for each candidate from vector search."""
     model_config = ConfigDict(extra="allow")  # Allow additional fields
 
+    # Core fields for LLM evaluation (shown to LLM)
     feature_name: str = Field(..., description="Name of the candidate feature")
     feature_value: Optional[str] = Field(None, description="Value/description of the feature")
     notes: Optional[str] = Field(None, description="Additional semantic notes")
     car_model: Optional[str] = Field(None, description="Car model containing OEM info")
 
-    # Additional fields that exist but should be hidden from LLM
+    # Additional fields from the new structure (hidden from LLM)
+    agent_type: Optional[str] = None
+    confidence: Optional[str] = None  # String confidence value (e.g., "95")
+    document_name: Optional[str] = None
+    embedding_type: Optional[str] = None
+    origin: Optional[str] = None
     package_type: Optional[str] = None
+    page_number: Optional[str] = None
+    price: Optional[str] = None
+    request_id: Optional[str] = None
     source: Optional[str] = None
+    timestamp: Optional[str] = None
 
 
 class MappedCandidate(BaseModel):
     """A single candidate from vector search results."""
     model_config = ConfigDict(extra="allow")
 
+    # Original fields from input
+    Type: Optional[str] = Field(None, description="Type of match (e.g., 'Keyword', 'FeatureName')")
+    sourcetext_featureid: Optional[str] = Field(None, description="Source text feature identifier")
+    extracted_feature_id: Optional[str] = Field(None, description="Extracted feature UUID")
     similarity_score: float = Field(..., ge=0.0, le=1.0, description="Vector similarity score")
-    confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="Confidence level")
     metadata: CandidateMetadata
 
     # Enhanced fields (added by LLM evaluation)
@@ -68,7 +81,10 @@ class FeatureMapping(BaseModel):
     """A single feature with its candidate mappings."""
     model_config = ConfigDict(extra="allow")
 
+    # Original fields from input
     Feature_Name: str = Field(..., description="The target feature to map")
+    Feature_Group: Optional[str] = Field(None, description="Feature group/category")
+    Uniq_Ref_No: Optional[str] = Field(None, description="Unique reference number")
     mapped_list: List[MappedCandidate] = Field(
         default_factory=list,
         description="List of candidate matches from vector search"
@@ -156,6 +172,41 @@ class EnhancedMappingResult(BaseModel):
     )
 
     # Configuration used
+    configuration: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Settings used for this evaluation"
+    )
+
+
+class AgentInputWrapper(BaseModel):
+    """Wrapper for the input JSON structure with ExecutionID, RequestID, etc."""
+    model_config = ConfigDict(extra="allow")
+
+    ExecutionID: Optional[str] = Field(None, description="Execution identifier")
+    RequestID: Optional[str] = Field(None, description="Request identifier")
+    Timestamp: Optional[str] = Field(None, description="Timestamp of execution")
+    AgentInterimOutput: List[FeatureMapping] = Field(
+        default_factory=list,
+        description="List of features with candidate mappings"
+    )
+
+
+class AgentOutputWrapper(BaseModel):
+    """Wrapper for the output JSON structure preserving original metadata."""
+    model_config = ConfigDict(extra="allow")
+
+    ExecutionID: Optional[str] = Field(None, description="Execution identifier")
+    RequestID: Optional[str] = Field(None, description="Request identifier")
+    Timestamp: Optional[str] = Field(None, description="Timestamp of execution")
+    AgentInterimOutput: List[FeatureMapping] = Field(
+        default_factory=list,
+        description="Enhanced features with LLM evaluations"
+    )
+    EvaluationSummary: Optional[EvaluationSummary] = None
+    FeaturesRequiringReview: List[str] = Field(
+        default_factory=list,
+        description="List of feature names that need manual review"
+    )
     configuration: Dict[str, Any] = Field(
         default_factory=dict,
         description="Settings used for this evaluation"

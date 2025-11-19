@@ -35,6 +35,8 @@ from enhanced_models import (
     EvaluationSummary,
     MatchQuality,
     QualityThresholds,
+    AgentInputWrapper,
+    AgentOutputWrapper,
 )
 from langchain_models import (
     CandidateEvaluation,
@@ -496,7 +498,8 @@ Evaluate the candidate and provide:
         Process input JSON and return enhanced results.
 
         Args:
-            input_data: Input JSON data (list of features or dict with features)
+            input_data: Input JSON data (list of features, dict with 'features',
+                       or dict with 'AgentInterimOutput')
 
         Returns:
             EnhancedMappingResult with evaluations and summary
@@ -504,13 +507,26 @@ Evaluate the candidate and provide:
         self.logger.info("")
         self.logger.info("🚀 Starting feature mapping process...")
 
-        # Parse input
+        # Parse input - support multiple formats
         if isinstance(input_data, list):
+            # Format 1: Direct list of features
             features_data = input_data
-        elif isinstance(input_data, dict) and "features" in input_data:
-            features_data = input_data["features"]
+        elif isinstance(input_data, dict):
+            if "AgentInterimOutput" in input_data:
+                # Format 2: New wrapper format with ExecutionID, RequestID, etc.
+                self.logger.info("📦 Detected new wrapper format with AgentInterimOutput")
+                features_data = input_data["AgentInterimOutput"]
+            elif "features" in input_data:
+                # Format 3: Old format with 'features' key
+                features_data = input_data["features"]
+            else:
+                raise ValueError(
+                    "Input dict must contain 'AgentInterimOutput' or 'features' key"
+                )
         else:
-            raise ValueError("Input must be a list of features or dict with 'features' key")
+            raise ValueError(
+                "Input must be a list of features or dict with 'features'/'AgentInterimOutput' key"
+            )
 
         # Convert to FeatureMapping objects
         features = [FeatureMapping(**f) for f in features_data]
@@ -550,6 +566,47 @@ Evaluate the candidate and provide:
         self._log_final_summary(summary)
 
         return result
+
+    def process_json_with_wrapper(self, input_data: Dict[str, Any]) -> AgentOutputWrapper:
+        """
+        Process input JSON with wrapper format and return wrapped output.
+
+        This method is designed for the new input format with ExecutionID,
+        RequestID, Timestamp, and AgentInterimOutput.
+
+        Args:
+            input_data: Input JSON data with wrapper structure
+
+        Returns:
+            AgentOutputWrapper with all original metadata preserved
+        """
+        # Parse input wrapper
+        if isinstance(input_data, dict) and "AgentInterimOutput" in input_data:
+            input_wrapper = AgentInputWrapper(**input_data)
+        else:
+            # If not in wrapper format, create a minimal wrapper
+            input_wrapper = AgentInputWrapper(
+                ExecutionID=None,
+                RequestID=None,
+                Timestamp=None,
+                AgentInterimOutput=input_data if isinstance(input_data, list) else input_data.get("features", [])
+            )
+
+        # Process features
+        result = self.process_json(input_data)
+
+        # Create output wrapper preserving original metadata
+        output_wrapper = AgentOutputWrapper(
+            ExecutionID=input_wrapper.ExecutionID,
+            RequestID=input_wrapper.RequestID,
+            Timestamp=input_wrapper.Timestamp,
+            AgentInterimOutput=result.features,
+            EvaluationSummary=result.EvaluationSummary,
+            FeaturesRequiringReview=result.FeaturesRequiringReview,
+            configuration=result.configuration,
+        )
+
+        return output_wrapper
 
     def _build_summary(self, features: List[FeatureMapping]) -> EvaluationSummary:
         """Build evaluation summary from processed features."""
@@ -706,20 +763,32 @@ Examples:
             log_level=log_level,
         )
 
-        # Process
-        result = mapper.process_json(input_data)
+        # Detect input format and process accordingly
+        has_wrapper = isinstance(input_data, dict) and "AgentInterimOutput" in input_data
+
+        if has_wrapper:
+            # Use wrapper-based processing (preserves ExecutionID, RequestID, etc.)
+            logger.info("📦 Using wrapper-based processing")
+            output = mapper.process_json_with_wrapper(input_data)
+            summary = output.EvaluationSummary
+        else:
+            # Use standard processing (legacy format)
+            logger.info("📄 Using standard processing")
+            result = mapper.process_json(input_data)
+            output = result
+            summary = result.EvaluationSummary
 
         # Save output
         logger.info(f"💾 Saving enhanced output to: {output_path}")
 
         with open(output_path, 'w') as f:
-            f.write(result.model_dump_json(indent=2, exclude_none=False))
+            f.write(output.model_dump_json(indent=2, exclude_none=False))
 
         logger.info(f"✅ Processing complete! Output saved to: {output_path}")
 
         # Exit with appropriate code
-        if result.EvaluationSummary.features_needing_review > 0:
-            logger.warning(f"⚠️  {result.EvaluationSummary.features_needing_review} feature(s) need manual review")
+        if summary.features_needing_review > 0:
+            logger.warning(f"⚠️  {summary.features_needing_review} feature(s) need manual review")
             sys.exit(1)
         else:
             sys.exit(0)
