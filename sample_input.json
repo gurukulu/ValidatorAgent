@@ -1,0 +1,214 @@
+[
+  {
+    "Feature_Name": "Engine Capacity (cc)",
+    "mapped_list": [
+      {
+        "similarity_score": 0.842,
+        "confidence": 0.91,
+        "metadata": {
+          "feature_name": "Engine Displacement",
+          "feature_value": "Total volume of all engine cylinders",
+          "notes": "Measured in cubic centimeters (cc) or liters",
+          "car_model": "BMW 3 Series",
+          "package_type": "Technical Specifications",
+          "source": "manufacturer_datasheet"
+        }
+      },
+      {
+        "similarity_score": 0.792,
+        "confidence": 0.85,
+        "metadata": {
+          "feature_name": "BMW Maps",
+          "feature_value": "Traffic information and navigation",
+          "notes": "Real-time traffic updates and route planning",
+          "car_model": "BMW 3 Series",
+          "package_type": "Infotainment",
+          "source": "feature_catalog"
+        }
+      },
+      {
+        "similarity_score": 0.65,
+        "confidence": 0.72,
+        "metadata": {
+          "feature_name": "Displacement (cm³)",
+          "feature_value": "Engine displacement in cubic centimeters",
+          "notes": "Same as engine capacity, different unit notation",
+          "car_model": "BMW 3 Series",
+          "package_type": "Technical Specifications",
+          "source": "manufacturer_datasheet"
+        }
+      },
+      {
+        "similarity_score": 0.58,
+        "confidence": 0.65,
+        "metadata": {
+          "feature_name": "Engine Size (L)",
+          "feature_value": "Engine displacement in liters",
+          "notes": "Converted from cc: 1L = 1000cc",
+          "car_model": "BMW 3 Series",
+          "package_type": "Technical Specifications",
+          "source": "manufacturer_datasheet"
+        }
+      },
+      {
+        "similarity_score": 0.45,
+        "confidence": 0.52,
+        "metadata": {
+          "feature_name": "Fuel Tank Capacity",
+          "feature_value": "Volume of fuel tank in liters",
+          "notes": "Maximum fuel storage capacity",
+          "car_model": "BMW 3 Series",
+          "package_type": "Technical Specifications",
+          "source": "manufacturer_datasheet"
+        }
+      }
+    ]
+  },
+  {
+    "Feature_Name": "Horsepower (HP)",
+    "mapped_list": [
+      {
+        "similarity_score": 0.91,
+        "confidence": 0.95,
+        "metadata": {
+          "feature_name": "Power Output (HP)",
+          "feature_value": "Maximum engine power in horsepower",
+          "notes": "Measured at specific RPM",
+          "car_model": "Mercedes-Benz C-Class",
+          "package_type": "Performance",
+          "source": "manufacturer_datasheet"
+        }
+      },
+      {
+        "similarity_score": 0.88,
+        "confidence": 0.92,
+        "metadata": {
+          "feature_name": "Engine Power (PS)",
+          "feature_value": "Maximum engine power in metric horsepower (PS)",
+          "notes": "1 PS ≈ 0.986 HP",
+          "car_model": "Mercedes-Benz C-Class",
+          "package_type": "Performance",
+          "source": "manufacturer_datasheet"
+        }
+      },
+      {
+        "similarity_score": 0.72,
+        "confidence": 0.78,
+        "metadata": {
+          "feature_name": "Power (kW)",
+          "feature_value": "Maximum engine power in kilowatts",
+          "notes": "SI unit: 1 kW ≈ 1.341 HP",
+          "car_model": "Mercedes-Benz C-Class",
+          "package_type": "Performance",
+          "source": "manufacturer_datasheet"
+        }
+      },
+      {
+        "similarity_score": 0.48,
+        "confidence": 0.55,
+        "metadata": {
+          "feature_name": "Torque (Nm)",
+          "feature_value": "Maximum engine torque in Newton-meters",
+          "notes": "Different from power, but related performance metric",
+          "car_model": "Mercedes-Benz C-Class",
+          "package_type": "Performance",
+          "source": "manufacturer_datasheet"
+        }
+      }
+    ]
+  },
+  {
+    "Feature_Name": "All-Wheel Drive (AWD)",
+    "mapped_list": [
+      {
+        "similarity_score": 0.95,
+        "confidence": 0.98,
+        "metadata": {
+          "feature_name": "4WD System",
+          "feature_value": "Four-wheel drive capability",
+          "notes": "Power distributed to all four wheels",
+          "car_model": "Audi Q5",
+          "package_type": "Drivetrain",
+          "source": "feature_catalog"
+        }
+      },
+      {
+        "similarity_score": 0.92,
+        "confidence": 0.96,
+        "metadata": {
+          "feature_name": "Quattro AWD",
+          "feature_value": "Audi's all-wheel drive system",
+          "notes": "Brand-specific AWD implementation",
+          "car_model": "Audi Q5",
+          "package_type": "Drivetrain",
+          "source": "feature_catalog"
+        }
+      },
+      {
+        "similarity_score": 0.62,
+        "confidence": 0.68,
+        "metadata": {
+          "feature_name": "Rear-Wheel Drive (RWD)",
+          "feature_value": "Power to rear wheels only",
+          "notes": "Different drivetrain configuration",
+          "car_model": "Audi Q5",
+          "package_type": "Drivetrain",
+          "source": "feature_catalog"
+        }
+      }
+    ]
+  },
+  {
+    "Feature_Name": "Bluetooth Connectivity",
+    "mapped_list": [
+      {
+        "similarity_score": 0.73,
+        "confidence": 0.82,
+        "metadata": {
+          "feature_name": "Wireless Phone Integration",
+          "feature_value": "Connect phones via Bluetooth",
+          "notes": "Hands-free calling and audio streaming",
+          "car_model": "Toyota Camry",
+          "package_type": "Connectivity",
+          "source": "feature_catalog"
+        }
+      },
+      {
+        "similarity_score": 0.68,
+        "confidence": 0.75,
+        "metadata": {
+          "feature_name": "Bluetooth Audio Streaming",
+          "feature_value": "Stream music from phone to car speakers",
+          "notes": "Part of Bluetooth connectivity suite",
+          "car_model": "Toyota Camry",
+          "package_type": "Connectivity",
+          "source": "feature_catalog"
+        }
+      },
+      {
+        "similarity_score": 0.55,
+        "confidence": 0.62,
+        "metadata": {
+          "feature_name": "Apple CarPlay",
+          "feature_value": "iPhone integration for apps and media",
+          "notes": "Uses USB or wireless connection, not pure Bluetooth",
+          "car_model": "Toyota Camry",
+          "package_type": "Connectivity",
+          "source": "feature_catalog"
+        }
+      },
+      {
+        "similarity_score": 0.42,
+        "confidence": 0.48,
+        "metadata": {
+          "feature_name": "USB Ports",
+          "feature_value": "Physical USB connections for devices",
+          "notes": "Wired connectivity, not wireless like Bluetooth",
+          "car_model": "Toyota Camry",
+          "package_type": "Connectivity",
+          "source": "feature_catalog"
+        }
+      }
+    ]
+  }
+]
