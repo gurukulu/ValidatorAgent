@@ -267,6 +267,51 @@ class BedrockFeatureMapper:
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse JSON from response: {e}\nResponse: {response_text[:200]}")
 
+    def _sanitize_evaluation_data(self, data: Dict[str, Any], max_reasoning_length: int = 2000) -> Dict[str, Any]:
+        """
+        Sanitize evaluation data to ensure it meets Pydantic constraints.
+
+        This prevents validation errors by truncating fields that are too long.
+
+        Args:
+            data: Raw evaluation data from LLM
+            max_reasoning_length: Maximum length for reasoning field
+
+        Returns:
+            Sanitized data that will pass Pydantic validation
+        """
+        # Truncate reasoning if too long
+        if "reasoning" in data and len(data["reasoning"]) > max_reasoning_length:
+            self.logger.warning(
+                f"⚠️ Reasoning too long ({len(data['reasoning'])} chars), "
+                f"truncating to {max_reasoning_length} chars"
+            )
+            data["reasoning"] = data["reasoning"][:max_reasoning_length-3] + "..."
+
+        # Limit key_factors to 5 items
+        if "key_factors" in data and len(data["key_factors"]) > 5:
+            self.logger.warning(f"⚠️ Too many key_factors ({len(data['key_factors'])}), limiting to 5")
+            data["key_factors"] = data["key_factors"][:5]
+
+        return data
+
+    def _sanitize_batch_data(self, data: Dict[str, Any], max_reasoning_length: int = 2000) -> Dict[str, Any]:
+        """
+        Sanitize batch evaluation data to ensure all evaluations meet Pydantic constraints.
+
+        Args:
+            data: Raw batch evaluation data from LLM
+            max_reasoning_length: Maximum length for reasoning field
+
+        Returns:
+            Sanitized data that will pass Pydantic validation
+        """
+        if "evaluations" in data and isinstance(data["evaluations"], list):
+            for eval_data in data["evaluations"]:
+                self._sanitize_evaluation_data(eval_data, max_reasoning_length)
+
+        return data
+
     def _extract_oem_from_car_model(self, car_model: Optional[str]) -> str:
         """
         Extract OEM/manufacturer from car model string.
@@ -362,10 +407,11 @@ OEM: {candidate.oem}
 Evaluate the candidate and provide your response as a JSON object with this exact structure:
 {{
   "context_matching_score": <integer 0-100>,
-  "reasoning": "<your reasoning here>",
-  "key_factors": ["factor1", "factor2", ...]
+  "reasoning": "<your reasoning here - be concise, max 2-3 sentences>",
+  "key_factors": ["factor1", "factor2", ...] // 1-5 factors
 }}
 
+IMPORTANT: Keep reasoning concise (2-3 sentences max, under 500 characters).
 Provide ONLY the JSON object, no additional text or formatting.
 """
         return prompt
@@ -434,19 +480,22 @@ Evaluate ALL {len(candidates)} candidates and provide your response as a JSON ob
   "evaluations": [
     {{
       "context_matching_score": <integer 0-100>,
-      "reasoning": "<reasoning for candidate 1>",
-      "key_factors": ["factor1", "factor2", ...]
+      "reasoning": "<reasoning for candidate 1 - be concise, 2-3 sentences max>",
+      "key_factors": ["factor1", "factor2", ...] // 1-5 factors
     }},
     {{
       "context_matching_score": <integer 0-100>,
-      "reasoning": "<reasoning for candidate 2>",
-      "key_factors": ["factor1", "factor2", ...]
+      "reasoning": "<reasoning for candidate 2 - be concise, 2-3 sentences max>",
+      "key_factors": ["factor1", "factor2", ...] // 1-5 factors
     }}
     // ... one evaluation object per candidate
   ]
 }}
 
-CRITICAL: Return evaluations in the SAME ORDER as the candidates (Candidate 1, 2, 3, etc.).
+CRITICAL:
+- Return evaluations in the SAME ORDER as the candidates (Candidate 1, 2, 3, etc.)
+- Keep each reasoning concise (2-3 sentences max, under 500 characters)
+- Provide 1-5 key_factors per candidate
 Provide ONLY the JSON object, no additional text or formatting.
 """
         return prompt
@@ -482,6 +531,9 @@ Provide ONLY the JSON object, no additional text or formatting.
 
                 # Parse JSON response
                 response_data = self._parse_json_response(response_text)
+
+                # Sanitize data to prevent validation errors
+                response_data = self._sanitize_evaluation_data(response_data)
 
                 # Validate with Pydantic
                 evaluation = CandidateEvaluation(**response_data)
@@ -557,6 +609,9 @@ Provide ONLY the JSON object, no additional text or formatting.
 
                 # Parse JSON response
                 response_data = self._parse_json_response(response_text)
+
+                # Sanitize data to prevent validation errors
+                response_data = self._sanitize_batch_data(response_data)
 
                 # Validate with Pydantic
                 batch_result = BatchEvaluationResult(**response_data)
