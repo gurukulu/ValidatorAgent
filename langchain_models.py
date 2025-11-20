@@ -56,7 +56,7 @@ class CandidateEvaluation(BaseModel):
     reasoning: str = Field(
         ...,
         min_length=10,
-        max_length=500,
+        max_length=2000,
         description=(
             "Clear explanation of why this score was assigned. "
             "Focus on semantic relationships, concept overlap, "
