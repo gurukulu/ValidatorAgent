@@ -943,7 +943,7 @@ Provide ONLY the JSON object, no additional text or formatting.
             RequestID=input_wrapper.RequestID,
             Timestamp=input_wrapper.Timestamp,
             AgentInterimOutput=result.features,
-            EvaluationSummary=result.EvaluationSummary,
+            evaluation_summary=result.EvaluationSummary,
             FeaturesRequiringReview=result.FeaturesRequiringReview,
             configuration=result.configuration,
         )
@@ -1150,7 +1150,7 @@ Examples:
             # Use wrapper-based processing (preserves ExecutionID, RequestID, etc.)
             logger.info("📦 Using wrapper-based processing")
             output = mapper.process_json_with_wrapper(input_data)
-            summary = output.EvaluationSummary
+            summary = output.evaluation_summary
         else:
             # Use standard processing (legacy format)
             logger.info("📄 Using standard processing")

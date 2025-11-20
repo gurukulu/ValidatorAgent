@@ -193,7 +193,7 @@ class AgentInputWrapper(BaseModel):
 
 class AgentOutputWrapper(BaseModel):
     """Wrapper for the output JSON structure preserving original metadata."""
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     ExecutionID: Optional[str] = Field(None, description="Execution identifier")
     RequestID: Optional[str] = Field(None, description="Request identifier")
@@ -202,7 +202,11 @@ class AgentOutputWrapper(BaseModel):
         default_factory=list,
         description="Enhanced features with LLM evaluations"
     )
-    EvaluationSummary: Optional[EvaluationSummary] = None
+    evaluation_summary: Optional[EvaluationSummary] = Field(
+        None,
+        alias="EvaluationSummary",
+        description="Summary statistics for the evaluation"
+    )
     FeaturesRequiringReview: List[str] = Field(
         default_factory=list,
         description="List of feature names that need manual review"
