@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Enhanced Feature Mapper with LangChain and AWS Bedrock.
+Enhanced Feature Mapper with AWS Bedrock.
 
 This script evaluates feature mappings using:
 1. Vector similarity scores (from Pinecone or similar)
-2. LLM semantic evaluation (via AWS Bedrock + LangChain)
+2. LLM semantic evaluation (via AWS Bedrock)
 
 Key Strategy:
 - Candidates with similarity_score ≥ threshold → Auto-accept (no LLM call)
@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import boto3
-from langchain_aws import ChatBedrock
 from pydantic import ValidationError
 
 from enhanced_models import (
@@ -41,6 +40,7 @@ from enhanced_models import (
 from langchain_models import (
     CandidateEvaluation,
     BiasFreeCandidateInput,
+    BatchEvaluationResult,
 )
 
 
@@ -81,12 +81,12 @@ def setup_logging(level: int = logging.INFO) -> logging.Logger:
 
 
 # ============================================================================
-# LANGCHAIN FEATURE MAPPER
+# BEDROCK FEATURE MAPPER
 # ============================================================================
 
-class LangChainFeatureMapper:
+class BedrockFeatureMapper:
     """
-    Feature mapper using LangChain + AWS Bedrock for semantic evaluation.
+    Feature mapper using AWS Bedrock for semantic evaluation.
 
     Architecture:
     1. Split candidates by similarity threshold
@@ -99,7 +99,9 @@ class LangChainFeatureMapper:
     DEFAULT_SIMILARITY_THRESHOLD = 0.85
     DEFAULT_MAX_CANDIDATES = 10
     DEFAULT_MAX_RETRIES = 3
-    COST_PER_EVALUATION = 0.0003  # Estimated cost in USD
+    DEFAULT_BATCH_SIZE = 10  # Max candidates per batch LLM call
+    COST_PER_EVALUATION = 0.0003  # Estimated cost in USD (single call)
+    COST_PER_BATCH_CALL = 0.0008  # Estimated cost for batch call (amortized)
 
     def __init__(
         self,
@@ -107,17 +109,21 @@ class LangChainFeatureMapper:
         model_id: str = "eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
         similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
         max_candidates_to_evaluate: int = DEFAULT_MAX_CANDIDATES,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        use_batch_evaluation: bool = True,
         quality_thresholds: Optional[QualityThresholds] = None,
         log_level: int = logging.INFO,
     ):
         """
-        Initialize the LangChain Feature Mapper.
+        Initialize the Bedrock Feature Mapper.
 
         Args:
             aws_region: AWS region for Bedrock (default: eu-central-1)
             model_id: Bedrock model ID (default: Claude 3.7 Sonnet)
             similarity_threshold: Split point for evaluation (default: 0.85)
             max_candidates_to_evaluate: Max candidates to send to LLM (default: 10)
+            batch_size: Max candidates per batch LLM call (default: 10)
+            use_batch_evaluation: Enable batch evaluation to save tokens (default: True)
             quality_thresholds: Custom quality thresholds
             log_level: Logging level
         """
@@ -127,6 +133,8 @@ class LangChainFeatureMapper:
         self.model_id = model_id
         self.similarity_threshold = similarity_threshold
         self.max_candidates_to_evaluate = max_candidates_to_evaluate
+        self.batch_size = batch_size
+        self.use_batch_evaluation = use_batch_evaluation
         self.quality_thresholds = quality_thresholds or QualityThresholds()
 
         # Statistics
@@ -136,54 +144,128 @@ class LangChainFeatureMapper:
             "candidates_evaluated": 0,
             "candidates_auto_accepted": 0,
             "llm_calls": 0,
+            "batch_llm_calls": 0,
+            "individual_llm_calls": 0,
             "llm_errors": 0,
+            "batch_fallbacks": 0,  # Times we fell back to individual calls
         }
 
         self.logger.info("=" * 80)
-        self.logger.info("🚀 LangChain Feature Mapper Initialized")
+        self.logger.info("🚀 Bedrock Feature Mapper Initialized")
         self.logger.info("=" * 80)
         self.logger.info(f"📍 AWS Region: {self.aws_region}")
         self.logger.info(f"🤖 Model: {self.model_id}")
         self.logger.info(f"📊 Similarity Threshold: {self.similarity_threshold}")
         self.logger.info(f"🎯 Max Candidates to Evaluate: {self.max_candidates_to_evaluate}")
+        self.logger.info(f"📦 Batch Evaluation: {'Enabled' if self.use_batch_evaluation else 'Disabled'} "
+                        f"(batch size: {self.batch_size})")
         self.logger.info(f"✨ Quality Thresholds: Auto-accept={self.quality_thresholds.auto_accept}, "
                         f"Review={self.quality_thresholds.manual_review}, "
                         f"Reject={self.quality_thresholds.reject}")
         self.logger.info("=" * 80)
 
-        # Initialize LangChain with Bedrock
-        self._initialize_langchain()
+        # Initialize AWS Bedrock client
+        self._initialize_bedrock()
 
-    def _initialize_langchain(self) -> None:
-        """Initialize LangChain with AWS Bedrock backend."""
+    def _initialize_bedrock(self) -> None:
+        """Initialize AWS Bedrock client."""
         try:
-            self.logger.info("🔧 Initializing LangChain with AWS Bedrock...")
+            self.logger.info("🔧 Initializing AWS Bedrock client...")
 
-            # Create Bedrock client using AWS config credentials
-            bedrock_client = boto3.client(
+            # Create Bedrock runtime client using AWS config credentials
+            self.bedrock_client = boto3.client(
                 service_name="bedrock-runtime",
                 region_name=self.aws_region,
             )
 
-            # Create LangChain ChatBedrock instance
-            self.llm = ChatBedrock(
-                client=bedrock_client,
-                model_id=self.model_id,
-                model_kwargs={
-                    "temperature": 0.1,  # Low temperature for consistent evaluation
-                    "top_p": 0.9,
-                    "max_tokens": 1000,
-                },
-            )
+            # Model configuration
+            self.model_config = {
+                "temperature": 0.1,  # Low temperature for consistent evaluation
+                "top_p": 0.9,
+                "max_tokens": 4000,  # Increased for batch evaluations
+            }
 
-            # Create structured output LLM
-            self.structured_llm = self.llm.with_structured_output(CandidateEvaluation)
-
-            self.logger.info("✅ LangChain initialized successfully")
+            self.logger.info("✅ AWS Bedrock client initialized successfully")
 
         except Exception as e:
-            self.logger.error(f"❌ Failed to initialize LangChain: {e}")
+            self.logger.error(f"❌ Failed to initialize AWS Bedrock client: {e}")
             raise
+
+    def _invoke_bedrock(self, prompt: str) -> str:
+        """
+        Invoke AWS Bedrock with a prompt and return the response text.
+
+        Args:
+            prompt: The prompt to send to the model
+
+        Returns:
+            Response text from the model
+
+        Raises:
+            Exception: If the API call fails
+        """
+        # Prepare request body for Claude models
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": self.model_config["max_tokens"],
+            "temperature": self.model_config["temperature"],
+            "top_p": self.model_config["top_p"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        }
+
+        # Invoke the model
+        response = self.bedrock_client.invoke_model(
+            modelId=self.model_id,
+            body=json.dumps(request_body)
+        )
+
+        # Parse response
+        response_body = json.loads(response['body'].read())
+
+        # Extract text from Claude response format
+        if 'content' in response_body and len(response_body['content']) > 0:
+            return response_body['content'][0]['text']
+        else:
+            raise ValueError("Unexpected response format from Bedrock")
+
+    def _parse_json_response(self, response_text: str) -> Dict[str, Any]:
+        """
+        Extract and parse JSON from LLM response.
+
+        The LLM might wrap JSON in markdown code blocks or add explanatory text.
+        This method extracts the JSON and parses it.
+
+        Args:
+            response_text: Raw response text from LLM
+
+        Returns:
+            Parsed JSON as dictionary
+
+        Raises:
+            ValueError: If JSON cannot be extracted or parsed
+        """
+        # Try to find JSON in code blocks first
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # Try to find raw JSON (starts with { and ends with })
+            json_match = re.search(r'(\{.*\})', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # Assume the entire response is JSON
+                json_str = response_text.strip()
+
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse JSON from response: {e}\nResponse: {response_text[:200]}")
 
     def _extract_oem_from_car_model(self, car_model: Optional[str]) -> str:
         """
@@ -277,10 +359,95 @@ OEM: {candidate.oem}
 - Base your score purely on semantic relationships
 - Provide clear reasoning for your score
 
-Evaluate the candidate and provide:
-1. A context_matching_score (0-100)
-2. Clear reasoning for your score
-3. Key factors that influenced your decision (1-5 factors)
+Evaluate the candidate and provide your response as a JSON object with this exact structure:
+{{
+  "context_matching_score": <integer 0-100>,
+  "reasoning": "<your reasoning here>",
+  "key_factors": ["factor1", "factor2", ...]
+}}
+
+Provide ONLY the JSON object, no additional text or formatting.
+"""
+        return prompt
+
+    def _build_batch_evaluation_prompt(
+        self,
+        target_feature_name: str,
+        candidates: List[BiasFreeCandidateInput],
+    ) -> str:
+        """
+        Build the prompt for batch LLM evaluation.
+
+        Args:
+            target_feature_name: The feature we're trying to match
+            candidates: List of bias-free candidate data
+
+        Returns:
+            Formatted prompt string for batch evaluation
+        """
+        # Build candidate list
+        candidates_text = ""
+        for idx, candidate in enumerate(candidates, 1):
+            candidates_text += f"""
+**CANDIDATE {idx}**:
+Name: {candidate.feature_name}
+Value: {candidate.feature_value}
+Notes: {candidate.notes}
+OEM: {candidate.oem}
+"""
+
+        prompt = f"""You are an expert in automotive feature mapping and semantic similarity evaluation.
+
+**TASK**: Evaluate how well EACH candidate feature matches the TARGET feature based on SEMANTIC MEANING only.
+
+**TARGET FEATURE**:
+Name: {target_feature_name}
+
+**CANDIDATES TO EVALUATE**:
+{candidates_text}
+
+**EVALUATION CRITERIA**:
+- Focus on SEMANTIC meaning, not string similarity
+- Consider synonyms (e.g., "Engine Capacity" = "Displacement")
+- Consider unit conversions (e.g., "cc" = "cm³")
+- Consider domain knowledge (automotive context)
+- Ignore irrelevant fields like "Maps", "Navigation" when target is mechanical
+
+**SCORING GUIDE**:
+- 90-100: Perfect semantic match (same concept, different wording)
+- 80-89: Very strong match (closely related concepts)
+- 70-79: Good match (related with clear connection)
+- 60-69: Moderate match (some relationship exists)
+- 40-59: Weak match (tangential relationship)
+- 20-39: Very weak match (minimal connection)
+- 0-19: No meaningful relationship
+
+**IMPORTANT**:
+- Evaluate EACH candidate independently (don't compare candidates to each other)
+- Be objective and precise for each candidate
+- Don't be influenced by any external factors
+- Base your scores purely on semantic relationships with the TARGET
+- Provide clear reasoning for each candidate's score
+
+Evaluate ALL {len(candidates)} candidates and provide your response as a JSON object with this exact structure:
+{{
+  "evaluations": [
+    {{
+      "context_matching_score": <integer 0-100>,
+      "reasoning": "<reasoning for candidate 1>",
+      "key_factors": ["factor1", "factor2", ...]
+    }},
+    {{
+      "context_matching_score": <integer 0-100>,
+      "reasoning": "<reasoning for candidate 2>",
+      "key_factors": ["factor1", "factor2", ...]
+    }}
+    // ... one evaluation object per candidate
+  ]
+}}
+
+CRITICAL: Return evaluations in the SAME ORDER as the candidates (Candidate 1, 2, 3, etc.).
+Provide ONLY the JSON object, no additional text or formatting.
 """
         return prompt
 
@@ -310,13 +477,19 @@ Evaluate the candidate and provide:
             try:
                 self.logger.debug(f"🔄 LLM evaluation attempt {attempt + 1}/{max_retries}")
 
-                # Invoke LLM with structured output
-                response: CandidateEvaluation = self.structured_llm.invoke(prompt)
+                # Invoke Bedrock
+                response_text = self._invoke_bedrock(prompt)
+
+                # Parse JSON response
+                response_data = self._parse_json_response(response_text)
+
+                # Validate with Pydantic
+                evaluation = CandidateEvaluation(**response_data)
 
                 self.stats["llm_calls"] += 1
 
-                self.logger.debug(f"✅ LLM returned score: {response.context_matching_score}")
-                return response
+                self.logger.debug(f"✅ LLM returned score: {evaluation.context_matching_score}")
+                return evaluation
 
             except ValidationError as e:
                 self.logger.warning(f"⚠️ Validation error on attempt {attempt + 1}: {e}")
@@ -334,6 +507,95 @@ Evaluate the candidate and provide:
 
         # Should never reach here
         raise Exception("Failed to evaluate candidate after all retries")
+
+    def _evaluate_candidates_batch(
+        self,
+        target_feature_name: str,
+        candidates: List[MappedCandidate],
+    ) -> List[CandidateEvaluation]:
+        """
+        Evaluate multiple candidates in a single LLM call (batch evaluation).
+
+        This is more token-efficient than individual calls because the prompt
+        instructions are sent only once for all candidates.
+
+        Args:
+            target_feature_name: Target feature name
+            candidates: List of candidates to evaluate
+
+        Returns:
+            List of CandidateEvaluation (one per candidate, in same order)
+
+        Raises:
+            Exception: If all retries fail
+        """
+        if not candidates:
+            return []
+
+        # Create bias-free candidates
+        bias_free_candidates = [
+            self._create_bias_free_candidate(candidate)
+            for candidate in candidates
+        ]
+
+        # Build batch prompt
+        prompt = self._build_batch_evaluation_prompt(
+            target_feature_name,
+            bias_free_candidates,
+        )
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(
+                    f"🔄 Batch LLM evaluation attempt {attempt + 1}/{max_retries} "
+                    f"for {len(candidates)} candidates"
+                )
+
+                # Invoke Bedrock
+                response_text = self._invoke_bedrock(prompt)
+
+                # Parse JSON response
+                response_data = self._parse_json_response(response_text)
+
+                # Validate with Pydantic
+                batch_result = BatchEvaluationResult(**response_data)
+
+                # Validate that we got the right number of evaluations
+                if len(batch_result.evaluations) != len(candidates):
+                    raise ValueError(
+                        f"Expected {len(candidates)} evaluations, "
+                        f"got {len(batch_result.evaluations)}"
+                    )
+
+                self.stats["batch_llm_calls"] += 1
+                self.stats["llm_calls"] += 1
+
+                self.logger.debug(
+                    f"✅ Batch LLM returned {len(batch_result.evaluations)} evaluations"
+                )
+                return batch_result.evaluations
+
+            except ValidationError as e:
+                self.logger.warning(
+                    f"⚠️ Batch validation error on attempt {attempt + 1}: {e}"
+                )
+                if attempt == max_retries - 1:
+                    self.stats["llm_errors"] += 1
+                    raise
+                time.sleep(2 ** attempt)  # Exponential backoff
+
+            except Exception as e:
+                self.logger.error(
+                    f"❌ Batch LLM error on attempt {attempt + 1}: {e}"
+                )
+                if attempt == max_retries - 1:
+                    self.stats["llm_errors"] += 1
+                    raise
+                time.sleep(2 ** attempt)
+
+        # Should never reach here
+        raise Exception("Failed to evaluate candidates in batch after all retries")
 
     def _classify_quality(self, score: int) -> MatchQuality:
         """
@@ -353,6 +615,70 @@ Evaluate the candidate and provide:
             return MatchQuality.NEEDS_REVIEW
         else:
             return MatchQuality.POOR
+
+    def _evaluate_candidates_individually(
+        self,
+        feature: FeatureMapping,
+        candidates_to_evaluate: List[MappedCandidate],
+    ) -> None:
+        """
+        Evaluate candidates one-by-one with individual LLM calls.
+
+        This is used as a fallback when batch evaluation fails or is disabled.
+
+        Args:
+            feature: The feature being processed
+            candidates_to_evaluate: List of candidates to evaluate
+        """
+        for idx, candidate in enumerate(candidates_to_evaluate, 1):
+            try:
+                self.logger.info(
+                    f"  [{idx}/{len(candidates_to_evaluate)}] Evaluating: {candidate.metadata.feature_name} "
+                    f"(similarity: {candidate.similarity_score:.3f})"
+                )
+
+                # Evaluate with LLM
+                evaluation = self._evaluate_candidate_with_llm(
+                    target_feature_name=feature.Feature_Name,
+                    candidate=candidate,
+                )
+
+                # Update candidate with evaluation results
+                candidate.context_matching_score = evaluation.context_matching_score
+                candidate.match_quality = self._classify_quality(evaluation.context_matching_score)
+                candidate.evaluated = True
+                candidate.llm_reasoning = evaluation.reasoning
+
+                self.stats["candidates_evaluated"] += 1
+                self.stats["individual_llm_calls"] += 1
+
+                # Log result
+                quality_emoji = {
+                    MatchQuality.EXCELLENT: "🌟",
+                    MatchQuality.GOOD: "👍",
+                    MatchQuality.NEEDS_REVIEW: "⚠️",
+                    MatchQuality.POOR: "👎",
+                }
+                emoji = quality_emoji.get(candidate.match_quality, "❓")
+
+                self.logger.info(
+                    f"      {emoji} Score: {candidate.context_matching_score}/100 "
+                    f"({candidate.match_quality.value})"
+                )
+                self.logger.debug(f"      💭 Reasoning: {evaluation.reasoning[:100]}...")
+
+                # Special highlight for semantic matches despite low similarity
+                if (candidate.similarity_score < self.similarity_threshold and
+                    candidate.context_matching_score >= self.quality_thresholds.auto_accept):
+                    self.logger.info(f"      🎯 Found semantic match despite low similarity!")
+
+            except Exception as e:
+                self.logger.error(f"      ❌ Failed to evaluate candidate: {e}")
+                # Fallback: assign neutral score
+                candidate.context_matching_score = 50
+                candidate.match_quality = MatchQuality.NEEDS_REVIEW
+                candidate.evaluated = True
+                candidate.llm_reasoning = f"Evaluation failed: {str(e)}"
 
     def _process_single_feature(self, feature: FeatureMapping) -> FeatureMapping:
         """
@@ -403,49 +729,65 @@ Evaluate the candidate and provide:
         if candidates_to_evaluate:
             self.logger.info(f"🤖 Evaluating {len(candidates_to_evaluate)} candidates with LLM...")
 
-        for idx, candidate in enumerate(candidates_to_evaluate, 1):
-            try:
-                self.logger.info(f"  [{idx}/{len(candidates_to_evaluate)}] Evaluating: {candidate.metadata.feature_name} "
-                               f"(similarity: {candidate.similarity_score:.3f})")
+            # Try batch evaluation first (if enabled)
+            if self.use_batch_evaluation and len(candidates_to_evaluate) > 1:
+                try:
+                    self.logger.info(f"📦 Using batch evaluation for {len(candidates_to_evaluate)} candidates")
 
-                # Evaluate with LLM
-                evaluation = self._evaluate_candidate_with_llm(
-                    target_feature_name=feature.Feature_Name,
-                    candidate=candidate,
+                    # Evaluate all candidates in a single batch call
+                    evaluations = self._evaluate_candidates_batch(
+                        target_feature_name=feature.Feature_Name,
+                        candidates=candidates_to_evaluate,
+                    )
+
+                    # Update candidates with batch evaluation results
+                    for idx, (candidate, evaluation) in enumerate(zip(candidates_to_evaluate, evaluations), 1):
+                        candidate.context_matching_score = evaluation.context_matching_score
+                        candidate.match_quality = self._classify_quality(evaluation.context_matching_score)
+                        candidate.evaluated = True
+                        candidate.llm_reasoning = evaluation.reasoning
+                        self.stats["candidates_evaluated"] += 1
+
+                        # Log result
+                        quality_emoji = {
+                            MatchQuality.EXCELLENT: "🌟",
+                            MatchQuality.GOOD: "👍",
+                            MatchQuality.NEEDS_REVIEW: "⚠️",
+                            MatchQuality.POOR: "👎",
+                        }
+                        emoji = quality_emoji.get(candidate.match_quality, "❓")
+
+                        self.logger.info(
+                            f"  [{idx}/{len(candidates_to_evaluate)}] {candidate.metadata.feature_name} "
+                            f"(similarity: {candidate.similarity_score:.3f}) "
+                            f"{emoji} Score: {candidate.context_matching_score}/100 ({candidate.match_quality.value})"
+                        )
+
+                        # Special highlight for semantic matches despite low similarity
+                        if (candidate.similarity_score < self.similarity_threshold and
+                            candidate.context_matching_score >= self.quality_thresholds.auto_accept):
+                            self.logger.info(f"      🎯 Found semantic match despite low similarity!")
+
+                except Exception as e:
+                    # Batch evaluation failed - fall back to individual evaluation
+                    self.logger.warning(f"⚠️ Batch evaluation failed: {e}")
+                    self.logger.info("🔄 Falling back to individual evaluation...")
+                    self.stats["batch_fallbacks"] += 1
+
+                    # Process individually as fallback
+                    self._evaluate_candidates_individually(
+                        feature, candidates_to_evaluate
+                    )
+            else:
+                # Use individual evaluation (batch disabled or single candidate)
+                if len(candidates_to_evaluate) == 1:
+                    self.logger.info("Single candidate - using individual evaluation")
+                else:
+                    self.logger.info("Batch evaluation disabled - using individual evaluation")
+
+                self._evaluate_candidates_individually(
+                    feature, candidates_to_evaluate
                 )
-
-                # Update candidate with evaluation results
-                candidate.context_matching_score = evaluation.context_matching_score
-                candidate.match_quality = self._classify_quality(evaluation.context_matching_score)
-                candidate.evaluated = True
-                candidate.llm_reasoning = evaluation.reasoning
-
-                self.stats["candidates_evaluated"] += 1
-
-                # Log result
-                quality_emoji = {
-                    MatchQuality.EXCELLENT: "🌟",
-                    MatchQuality.GOOD: "👍",
-                    MatchQuality.NEEDS_REVIEW: "⚠️",
-                    MatchQuality.POOR: "👎",
-                }
-                emoji = quality_emoji.get(candidate.match_quality, "❓")
-
-                self.logger.info(f"      {emoji} Score: {candidate.context_matching_score}/100 ({candidate.match_quality.value})")
-                self.logger.debug(f"      💭 Reasoning: {evaluation.reasoning[:100]}...")
-
-                # Special highlight for semantic matches despite low similarity
-                if (candidate.similarity_score < self.similarity_threshold and
-                    candidate.context_matching_score >= self.quality_thresholds.auto_accept):
-                    self.logger.info(f"      🎯 Found semantic match despite low similarity!")
-
-            except Exception as e:
-                self.logger.error(f"      ❌ Failed to evaluate candidate: {e}")
-                # Fallback: assign neutral score
-                candidate.context_matching_score = 50
-                candidate.match_quality = MatchQuality.NEEDS_REVIEW
-                candidate.evaluated = True
-                candidate.llm_reasoning = f"Evaluation failed: {str(e)}"
 
         # Select best match
         self._select_best_match(feature)
@@ -601,7 +943,7 @@ Evaluate the candidate and provide:
             RequestID=input_wrapper.RequestID,
             Timestamp=input_wrapper.Timestamp,
             AgentInterimOutput=result.features,
-            EvaluationSummary=result.EvaluationSummary,
+            evaluation_summary=result.EvaluationSummary,
             FeaturesRequiringReview=result.FeaturesRequiringReview,
             configuration=result.configuration,
         )
@@ -627,7 +969,10 @@ Evaluate the candidate and provide:
                 elif best.match_quality == MatchQuality.POOR:
                     poor_count += 1
 
-        estimated_cost = self.stats["llm_calls"] * self.COST_PER_EVALUATION
+        # Calculate cost: batch calls are more expensive but amortized, individual calls are cheaper
+        batch_cost = self.stats["batch_llm_calls"] * self.COST_PER_BATCH_CALL
+        individual_cost = self.stats["individual_llm_calls"] * self.COST_PER_EVALUATION
+        estimated_cost = batch_cost + individual_cost
 
         return EvaluationSummary(
             total_features=self.stats["total_features"],
@@ -659,8 +1004,24 @@ Evaluate the candidate and provide:
         self.logger.info(f"  ⚠️  Needs Review: {summary.features_needing_review}")
         self.logger.info(f"  👎 Poor Matches: {summary.features_with_poor_matches}")
         self.logger.info("")
+        self.logger.info("📞 LLM API Calls:")
+        self.logger.info(f"  📦 Batch Calls: {self.stats['batch_llm_calls']}")
+        self.logger.info(f"  🔹 Individual Calls: {self.stats['individual_llm_calls']}")
+        self.logger.info(f"  📊 Total API Calls: {summary.estimated_llm_calls}")
+        if self.stats["batch_fallbacks"] > 0:
+            self.logger.warning(f"  🔄 Batch Fallbacks: {self.stats['batch_fallbacks']}")
+        self.logger.info("")
         self.logger.info(f"💰 Estimated Cost: ${summary.estimated_cost_usd:.4f} USD")
-        self.logger.info(f"📞 LLM API Calls: {summary.estimated_llm_calls}")
+
+        # Calculate savings if using batch
+        if self.stats["batch_llm_calls"] > 0:
+            # What it would have cost with individual calls
+            hypothetical_individual_cost = summary.candidates_evaluated * self.COST_PER_EVALUATION
+            savings = hypothetical_individual_cost - summary.estimated_cost_usd
+            savings_pct = (savings / hypothetical_individual_cost * 100) if hypothetical_individual_cost > 0 else 0
+            if savings > 0:
+                self.logger.info(f"💡 Batch Savings: ${savings:.4f} USD ({savings_pct:.1f}% reduction)")
+
         if self.stats["llm_errors"] > 0:
             self.logger.warning(f"⚠️  LLM Errors: {self.stats['llm_errors']}")
         self.logger.info("=" * 80)
@@ -675,15 +1036,21 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Enhanced Feature Mapper with LLM Semantic Evaluation",
+        description="Enhanced Feature Mapper with AWS Bedrock LLM Semantic Evaluation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process with defaults
+  # Process with defaults (batch evaluation enabled)
   python enhanced_mapper_langchain.py input.json
 
   # Custom threshold
   python enhanced_mapper_langchain.py input.json --threshold 0.80
+
+  # Disable batch evaluation (use individual LLM calls)
+  python enhanced_mapper_langchain.py input.json --no-batch
+
+  # Custom batch size
+  python enhanced_mapper_langchain.py input.json --batch-size 15
 
   # Debug logging
   python enhanced_mapper_langchain.py input.json --debug
@@ -715,6 +1082,17 @@ Examples:
         type=int,
         default=10,
         help="Max candidates to evaluate per feature (default: 10)"
+    )
+    parser.add_argument(
+        "--batch-size", "-b",
+        type=int,
+        default=10,
+        help="Max candidates per batch LLM call (default: 10)"
+    )
+    parser.add_argument(
+        "--no-batch",
+        action="store_true",
+        help="Disable batch evaluation (use individual LLM calls)"
     )
     parser.add_argument(
         "--region",
@@ -755,11 +1133,13 @@ Examples:
             input_data = json.load(f)
 
         # Initialize mapper
-        mapper = LangChainFeatureMapper(
+        mapper = BedrockFeatureMapper(
             aws_region=args.region,
             model_id=args.model,
             similarity_threshold=args.threshold,
             max_candidates_to_evaluate=args.max_candidates,
+            batch_size=args.batch_size,
+            use_batch_evaluation=not args.no_batch,
             log_level=log_level,
         )
 
@@ -770,7 +1150,7 @@ Examples:
             # Use wrapper-based processing (preserves ExecutionID, RequestID, etc.)
             logger.info("📦 Using wrapper-based processing")
             output = mapper.process_json_with_wrapper(input_data)
-            summary = output.EvaluationSummary
+            summary = output.evaluation_summary
         else:
             # Use standard processing (legacy format)
             logger.info("📄 Using standard processing")
