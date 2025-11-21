@@ -382,9 +382,18 @@ class BedrockFeatureMapper:
         Returns:
             Formatted prompt string
         """
-        prompt = f"""You are an expert in automotive feature mapping and semantic similarity evaluation.
+        prompt = f"""You are a senior automotive engineer with 15+ years of experience in vehicle systems design,
+specializing in powertrain, safety systems, infotainment, ADAS, and chassis technologies.
 
-**TASK**: Evaluate how well the CANDIDATE feature matches the TARGET feature based on SEMANTIC MEANING only.
+**YOUR ROLE**: Critically evaluate this feature match with PRECISION and TECHNICAL ACCURACY.
+Be conservative - it's better to score LOW than create a false match.
+
+**APPROACH**:
+1. Analyze technical specifications and subsystem alignment
+2. Identify disqualifying differences (units, context, function)
+3. Consider OEM-specific vs generic features
+4. Apply automotive domain expertise
+5. When uncertain, score CONSERVATIVELY (precision over recall)
 
 **TARGET FEATURE**:
 Name: {target_feature_name}
@@ -395,27 +404,25 @@ Value: {candidate.feature_value}
 Notes: {candidate.notes}
 OEM: {candidate.oem}
 
-**EVALUATION CRITERIA**:
-- Focus on SEMANTIC meaning, not string similarity
-- Consider synonyms (e.g., "Engine Capacity" = "Displacement")
-- Consider unit conversions (e.g., "cc" = "cm³")
-- Consider domain knowledge (automotive context)
-- Ignore irrelevant fields like "Maps", "Navigation" when target is mechanical
+**EVALUATION CRITERIA** (Technical Precision):
+- Technical equivalence: Same function and compatible specifications
+- Subsystem alignment: Must belong to same vehicle subsystem (powertrain ≠ infotainment)
+- Unit compatibility: "cc" = "cm³" ✓, but "Torque (Nm)" ≠ "Power (HP)" ✗
+- OEM context: Proprietary features (e.g., BMW "iDrive", Mercedes "MBUX") need exact equivalents for high scores
+- Generic features: Standard features (Airbags, Engine Capacity) can match across OEMs
+- Functional purpose: Features must serve the same technical purpose
 
-**SCORING GUIDE**:
-- 90-100: Perfect semantic match (same concept, different wording)
-- 80-89: Very strong match (closely related concepts)
-- 70-79: Good match (related with clear connection)
-- 60-69: Moderate match (some relationship exists)
-- 40-59: Weak match (tangential relationship)
-- 20-39: Very weak match (minimal connection)
-- 0-19: No meaningful relationship
+**SCORING GUIDE** (Conservative):
+- 90-100: TRUE technical equivalent (same function, same subsystem, compatible specs)
+- 70-89: Related subsystem, clear technical connection, but distinct features
+- 50-69: Weak relationship, different technical purpose or incompatible
+- 0-49: No meaningful technical connection or different subsystems
 
-**IMPORTANT**:
-- Be objective and precise
-- Don't be influenced by any external factors
-- Base your score purely on semantic relationships
-- Provide clear reasoning for your score
+**CRITICAL RULES**:
+- Be STRICT: Only high scores (90+) for true technical equivalents
+- Identify disqualifying factors: different units, subsystems, or technical context
+- OEM proprietary features rarely match across brands unless functionally identical
+- When in doubt, score LOW - precision is critical
 
 Evaluate the candidate and provide your response as a JSON object with this exact structure:
 {{
@@ -455,9 +462,18 @@ Notes: {candidate.notes}
 OEM: {candidate.oem}
 """
 
-        prompt = f"""You are an expert in automotive feature mapping and semantic similarity evaluation.
+        prompt = f"""You are a senior automotive engineer with 15+ years of experience in vehicle systems design,
+specializing in powertrain, safety systems, infotainment, ADAS, and chassis technologies.
 
-**TASK**: Evaluate how well EACH candidate feature matches the TARGET feature based on SEMANTIC MEANING only.
+**YOUR ROLE**: Critically evaluate feature matches with PRECISION and TECHNICAL ACCURACY.
+Be conservative - it's better to score LOW than create false matches.
+
+**APPROACH**:
+1. Analyze technical specifications and subsystem alignment
+2. Identify disqualifying differences (units, context, function)
+3. Consider OEM-specific vs generic features
+4. Apply automotive domain expertise
+5. When uncertain, score CONSERVATIVELY (precision over recall)
 
 **TARGET FEATURE**:
 Name: {target_feature_name}
@@ -465,28 +481,26 @@ Name: {target_feature_name}
 **CANDIDATES TO EVALUATE**:
 {candidates_text}
 
-**EVALUATION CRITERIA**:
-- Focus on SEMANTIC meaning, not string similarity
-- Consider synonyms (e.g., "Engine Capacity" = "Displacement")
-- Consider unit conversions (e.g., "cc" = "cm³")
-- Consider domain knowledge (automotive context)
-- Ignore irrelevant fields like "Maps", "Navigation" when target is mechanical
+**EVALUATION CRITERIA** (Technical Precision):
+- Technical equivalence: Same function and compatible specifications
+- Subsystem alignment: Must belong to same vehicle subsystem (powertrain ≠ infotainment)
+- Unit compatibility: "cc" = "cm³" ✓, but "Torque (Nm)" ≠ "Power (HP)" ✗
+- OEM context: Proprietary features (e.g., BMW "iDrive", Mercedes "MBUX") need exact equivalents for high scores
+- Generic features: Standard features (Airbags, Engine Capacity) can match across OEMs
+- Functional purpose: Features must serve the same technical purpose
 
-**SCORING GUIDE**:
-- 90-100: Perfect semantic match (same concept, different wording)
-- 80-89: Very strong match (closely related concepts)
-- 70-79: Good match (related with clear connection)
-- 60-69: Moderate match (some relationship exists)
-- 40-59: Weak match (tangential relationship)
-- 20-39: Very weak match (minimal connection)
-- 0-19: No meaningful relationship
+**SCORING GUIDE** (Conservative):
+- 90-100: TRUE technical equivalents (same function, same subsystem, compatible specs)
+- 70-89: Related subsystem, clear technical connection, but distinct features
+- 50-69: Weak relationship, different technical purpose or incompatible
+- 0-49: No meaningful technical connection or different subsystems
 
-**IMPORTANT**:
-- Evaluate EACH candidate independently (don't compare candidates to each other)
-- Be objective and precise for each candidate
-- Don't be influenced by any external factors
-- Base your scores purely on semantic relationships with the TARGET
-- Provide clear reasoning for each candidate's score
+**CRITICAL RULES**:
+- Be STRICT: Only high scores (90+) for true technical equivalents
+- Identify disqualifying factors: different units, subsystems, or technical context
+- OEM proprietary features rarely match across brands unless functionally identical
+- When in doubt, score LOW - precision is critical
+- Evaluate EACH candidate independently
 
 Evaluate ALL {len(candidates)} candidates and provide your response as a JSON object with this exact structure:
 {{
