@@ -1290,7 +1290,7 @@ Examples:
         logger = setup_logging(log_level)
         logger.info(f"📂 Loading input from: {args.input_file}")
 
-        with open(args.input_file, 'r') as f:
+        with open(args.input_file, 'r', encoding='utf-8') as f:
             input_data = json.load(f)
 
         # Initialize mapper
@@ -1323,7 +1323,7 @@ Examples:
         # Save output
         logger.info(f"💾 Saving enhanced output to: {output_path}")
 
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write(output.model_dump_json(indent=2, exclude_none=False))
 
         logger.info(f"✅ Processing complete! Output saved to: {output_path}")
