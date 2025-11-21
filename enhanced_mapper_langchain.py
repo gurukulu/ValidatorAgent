@@ -100,6 +100,7 @@ class BedrockFeatureMapper:
     DEFAULT_MAX_CANDIDATES = 10
     DEFAULT_MAX_RETRIES = 3
     DEFAULT_BATCH_SIZE = 10  # Max candidates per batch LLM call
+    DEFAULT_EVALUATE_ALL = True  # Evaluate ALL candidates below threshold
     COST_PER_EVALUATION = 0.0003  # Estimated cost in USD (single call)
     COST_PER_BATCH_CALL = 0.0008  # Estimated cost for batch call (amortized)
 
@@ -111,6 +112,7 @@ class BedrockFeatureMapper:
         max_candidates_to_evaluate: int = DEFAULT_MAX_CANDIDATES,
         batch_size: int = DEFAULT_BATCH_SIZE,
         use_batch_evaluation: bool = True,
+        evaluate_all: bool = DEFAULT_EVALUATE_ALL,
         quality_thresholds: Optional[QualityThresholds] = None,
         log_level: int = logging.INFO,
     ):
@@ -121,9 +123,10 @@ class BedrockFeatureMapper:
             aws_region: AWS region for Bedrock (default: eu-central-1)
             model_id: Bedrock model ID (default: Claude 3.7 Sonnet)
             similarity_threshold: Split point for evaluation (default: 0.85)
-            max_candidates_to_evaluate: Max candidates to send to LLM (default: 10)
+            max_candidates_to_evaluate: Max candidates if evaluate_all=False (default: 10)
             batch_size: Max candidates per batch LLM call (default: 10)
             use_batch_evaluation: Enable batch evaluation to save tokens (default: True)
+            evaluate_all: Evaluate ALL candidates below threshold, ignore max limit (default: True)
             quality_thresholds: Custom quality thresholds
             log_level: Logging level
         """
@@ -135,6 +138,7 @@ class BedrockFeatureMapper:
         self.max_candidates_to_evaluate = max_candidates_to_evaluate
         self.batch_size = batch_size
         self.use_batch_evaluation = use_batch_evaluation
+        self.evaluate_all = evaluate_all
         self.quality_thresholds = quality_thresholds or QualityThresholds()
 
         # Statistics
@@ -156,7 +160,10 @@ class BedrockFeatureMapper:
         self.logger.info(f"📍 AWS Region: {self.aws_region}")
         self.logger.info(f"🤖 Model: {self.model_id}")
         self.logger.info(f"📊 Similarity Threshold: {self.similarity_threshold}")
-        self.logger.info(f"🎯 Max Candidates to Evaluate: {self.max_candidates_to_evaluate}")
+        if self.evaluate_all:
+            self.logger.info(f"🎯 Candidate Evaluation: ALL candidates below threshold")
+        else:
+            self.logger.info(f"🎯 Max Candidates to Evaluate: {self.max_candidates_to_evaluate}")
         self.logger.info(f"📦 Batch Evaluation: {'Enabled' if self.use_batch_evaluation else 'Disabled'} "
                         f"(batch size: {self.batch_size})")
         self.logger.info(f"✨ Quality Thresholds: Auto-accept={self.quality_thresholds.auto_accept}, "
@@ -652,6 +659,50 @@ Provide ONLY the JSON object, no additional text or formatting.
         # Should never reach here
         raise Exception("Failed to evaluate candidates in batch after all retries")
 
+    def _evaluate_candidates_in_chunks(
+        self,
+        target_feature_name: str,
+        candidates: List[MappedCandidate],
+    ) -> List[CandidateEvaluation]:
+        """
+        Evaluate candidates in chunks to avoid max token issues.
+
+        This method splits candidates into batches of self.batch_size and
+        processes each batch separately, then combines results.
+
+        Args:
+            target_feature_name: Target feature name
+            candidates: List of candidates to evaluate
+
+        Returns:
+            List of CandidateEvaluation (one per candidate, in same order)
+        """
+        if not candidates:
+            return []
+
+        all_evaluations = []
+        total_candidates = len(candidates)
+
+        # Process candidates in chunks
+        for chunk_start in range(0, total_candidates, self.batch_size):
+            chunk_end = min(chunk_start + self.batch_size, total_candidates)
+            chunk = candidates[chunk_start:chunk_end]
+
+            self.logger.info(
+                f"  📦 Processing chunk {chunk_start//self.batch_size + 1} "
+                f"({len(chunk)} candidates: {chunk_start+1}-{chunk_end} of {total_candidates})"
+            )
+
+            # Evaluate this chunk
+            chunk_evaluations = self._evaluate_candidates_batch(
+                target_feature_name,
+                chunk,
+            )
+
+            all_evaluations.extend(chunk_evaluations)
+
+        return all_evaluations
+
     def _classify_quality(self, score: int) -> MatchQuality:
         """
         Classify match quality based on context score.
@@ -779,7 +830,17 @@ Provide ONLY the JSON object, no additional text or formatting.
             self.stats["candidates_auto_accepted"] += 1
 
         # Process below-threshold candidates (LLM evaluation)
-        candidates_to_evaluate = below_threshold[:self.max_candidates_to_evaluate]
+        if self.evaluate_all:
+            candidates_to_evaluate = below_threshold
+            if len(below_threshold) > self.max_candidates_to_evaluate:
+                self.logger.info(f"🎯 Evaluating ALL {len(candidates_to_evaluate)} candidates below threshold")
+        else:
+            candidates_to_evaluate = below_threshold[:self.max_candidates_to_evaluate]
+            if len(below_threshold) > self.max_candidates_to_evaluate:
+                self.logger.info(
+                    f"⚠️ {len(below_threshold)} candidates below threshold, "
+                    f"limiting to {self.max_candidates_to_evaluate}"
+                )
 
         if candidates_to_evaluate:
             self.logger.info(f"🤖 Evaluating {len(candidates_to_evaluate)} candidates with LLM...")
@@ -787,13 +848,22 @@ Provide ONLY the JSON object, no additional text or formatting.
             # Try batch evaluation first (if enabled)
             if self.use_batch_evaluation and len(candidates_to_evaluate) > 1:
                 try:
-                    self.logger.info(f"📦 Using batch evaluation for {len(candidates_to_evaluate)} candidates")
-
-                    # Evaluate all candidates in a single batch call
-                    evaluations = self._evaluate_candidates_batch(
-                        target_feature_name=feature.Feature_Name,
-                        candidates=candidates_to_evaluate,
-                    )
+                    # Use chunking if candidates exceed batch size
+                    if len(candidates_to_evaluate) > self.batch_size:
+                        self.logger.info(
+                            f"📦 Using chunked batch evaluation "
+                            f"({len(candidates_to_evaluate)} candidates in chunks of {self.batch_size})"
+                        )
+                        evaluations = self._evaluate_candidates_in_chunks(
+                            target_feature_name=feature.Feature_Name,
+                            candidates=candidates_to_evaluate,
+                        )
+                    else:
+                        self.logger.info(f"📦 Using batch evaluation for {len(candidates_to_evaluate)} candidates")
+                        evaluations = self._evaluate_candidates_batch(
+                            target_feature_name=feature.Feature_Name,
+                            candidates=candidates_to_evaluate,
+                        )
 
                     # Update candidates with batch evaluation results
                     for idx, (candidate, evaluation) in enumerate(zip(candidates_to_evaluate, evaluations), 1):
@@ -1095,17 +1165,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process with defaults (batch evaluation enabled)
+  # Process with defaults (batch evaluation + evaluate all candidates below threshold)
   python enhanced_mapper_langchain.py input.json
 
   # Custom threshold
   python enhanced_mapper_langchain.py input.json --threshold 0.80
 
+  # Limit to first 10 candidates (instead of evaluating all)
+  python enhanced_mapper_langchain.py input.json --no-evaluate-all --max-candidates 10
+
   # Disable batch evaluation (use individual LLM calls)
   python enhanced_mapper_langchain.py input.json --no-batch
 
-  # Custom batch size
-  python enhanced_mapper_langchain.py input.json --batch-size 15
+  # Custom batch size for chunking (avoid token limits)
+  python enhanced_mapper_langchain.py input.json --batch-size 5
 
   # Debug logging
   python enhanced_mapper_langchain.py input.json --debug
@@ -1148,6 +1221,11 @@ Examples:
         "--no-batch",
         action="store_true",
         help="Disable batch evaluation (use individual LLM calls)"
+    )
+    parser.add_argument(
+        "--no-evaluate-all",
+        action="store_true",
+        help="Limit to max-candidates instead of evaluating all below threshold"
     )
     parser.add_argument(
         "--region",
@@ -1195,6 +1273,7 @@ Examples:
             max_candidates_to_evaluate=args.max_candidates,
             batch_size=args.batch_size,
             use_batch_evaluation=not args.no_batch,
+            evaluate_all=not args.no_evaluate_all,
             log_level=log_level,
         )
 
