@@ -404,15 +404,16 @@ class BedrockFeatureMapper:
         prompt = f"""You are a senior automotive engineer with 15+ years of experience in vehicle systems design,
 specializing in powertrain, safety systems, infotainment, ADAS, and chassis technologies.
 
-**YOUR ROLE**: Critically evaluate this feature match with PRECISION and TECHNICAL ACCURACY.
-Be conservative - it's better to score LOW than create a false match.
+**YOUR ROLE**: Critically evaluate this feature match with EXTREME PRECISION. Reject non-matches decisively.
+MOST candidates will NOT match - only TRUE technical equivalents deserve high scores.
 
-**APPROACH**:
-1. Analyze technical specifications and subsystem alignment
-2. Identify disqualifying differences (units, context, function)
-3. Consider OEM-specific vs generic features
-4. Apply automotive domain expertise
-5. When uncertain, score CONSERVATIVELY (precision over recall)
+**CRITICAL: DISQUALIFYING FACTORS** (Automatic LOW score if ANY apply):
+1. ❌ Different subsystems (Braking ≠ Infotainment, Powertrain ≠ Safety, Electrical ≠ Mechanical)
+2. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
+3. ❌ Different languages without clear translation (German ≠ English unless obvious equivalent)
+4. ❌ Different components (Rotors ≠ Pads, Engine ≠ Transmission, Display ≠ Camera)
+5. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior)
+6. ❌ Vague semantic similarity without functional equivalence
 
 **TARGET FEATURE**:
 Name: {target_feature_name}
@@ -423,25 +424,53 @@ Value: {candidate.feature_value}
 Notes: {candidate.notes}
 OEM: {candidate.oem}
 
-**EVALUATION CRITERIA** (Technical Precision):
-- Technical equivalence: Same function and compatible specifications
-- Subsystem alignment: Must belong to same vehicle subsystem (powertrain ≠ infotainment)
-- Unit compatibility: "cc" = "cm³" ✓, but "Torque (Nm)" ≠ "Power (HP)" ✗
-- OEM context: Proprietary features (e.g., BMW "iDrive", Mercedes "MBUX") need exact equivalents for high scores
-- Generic features: Standard features (Airbags, Engine Capacity) can match across OEMs
-- Functional purpose: Features must serve the same technical purpose
+**STRICT EVALUATION PROCESS**:
+Step 1: Identify target's subsystem (Powertrain, Braking, Safety, Infotainment, ADAS, Chassis, Body, Electrical, etc.)
+Step 2: For candidate:
+   a) Does candidate belong to SAME subsystem? If NO → Score 0-20
+   b) Does candidate serve SAME functional purpose? If NO → Score 0-30
+   c) Are specifications compatible? If NO → Score 0-40
+   d) Only if YES to all: Consider 70+ score
+Step 3: Apply conservative scoring
 
-**SCORING GUIDE** (Conservative):
-- 90-100: TRUE technical equivalent (same function, same subsystem, compatible specs)
-- 70-89: Related subsystem, clear technical connection, but distinct features
-- 50-69: Weak relationship, different technical purpose or incompatible
-- 0-49: No meaningful technical connection or different subsystems
+**NEGATIVE EXAMPLES** (What NOT to match - Score 0-10):
+- "Brake Rotors" ≠ "Netztrennwan" (Braking ≠ Electrical, different subsystems)
+- "Engine Capacity" ≠ "Torque" (Capacity ≠ Force, different measurements)
+- "Airbags" ≠ "Seat Belts" (Both safety, but different components)
+- "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions)
+- "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components)
+
+**SUBSYSTEM TAXONOMY** (Features must match subsystem):
+- Powertrain: Engine, Transmission, Drivetrain, Fuel System
+- Braking: Rotors, Pads, Calipers, ABS, Brake Assist
+- Safety: Airbags, Seat Belts, Collision Warning, Emergency Brake
+- Infotainment: Display, Audio, Navigation, Connectivity
+- ADAS: Cameras, Sensors, Autopilot, Lane Assist, Parking Assist
+- Chassis: Suspension, Wheels, Tires, Steering
+- Electrical: Battery, Charging, Wiring, Fuses, Network Components
+- Body: Doors, Windows, Roof, Paint, Trim
+
+**SCORING GUIDE** (VERY Conservative):
+- 95-100: IDENTICAL features (exact same component, just different wording)
+- 85-94: TRUE functional equivalents (same subsystem, same function, compatible specs)
+- 70-84: Related features within same subsystem (e.g., "ABS" and "Brake Assist")
+- 40-69: Same subsystem but different components/functions
+- 20-39: Different subsystems but vague similarity
+- 0-19: Completely unrelated or different subsystems
+
+**VERIFICATION CHECKLIST** (Must pass ALL for 85+ score):
+✓ Same subsystem?
+✓ Same functional purpose?
+✓ Same measurement type (if applicable)?
+✓ Compatible specifications?
+✓ Clear technical equivalence (not just semantic similarity)?
 
 **CRITICAL RULES**:
-- Be STRICT: Only high scores (90+) for true technical equivalents
-- Identify disqualifying factors: different units, subsystems, or technical context
-- OEM proprietary features rarely match across brands unless functionally identical
-- When in doubt, score LOW - precision is critical
+- Most candidates will score 0-50 (this is NORMAL and EXPECTED)
+- Scores 90+ should be RARE (only true equivalents)
+- Different subsystems = automatic score <20
+- When uncertain about equivalence, score 30-50 (not 70-80)
+- Precision is CRITICAL - false positives are worse than false negatives
 
 Evaluate the candidate and provide your response as a JSON object with this exact structure:
 {{
@@ -484,15 +513,16 @@ OEM: {candidate.oem}
         prompt = f"""You are a senior automotive engineer with 15+ years of experience in vehicle systems design,
 specializing in powertrain, safety systems, infotainment, ADAS, and chassis technologies.
 
-**YOUR ROLE**: Critically evaluate feature matches with PRECISION and TECHNICAL ACCURACY.
-Be conservative - it's better to score LOW than create false matches.
+**YOUR ROLE**: Critically evaluate feature matches with EXTREME PRECISION. Reject non-matches decisively.
+MOST candidates will NOT match - only TRUE technical equivalents deserve high scores.
 
-**APPROACH**:
-1. Analyze technical specifications and subsystem alignment
-2. Identify disqualifying differences (units, context, function)
-3. Consider OEM-specific vs generic features
-4. Apply automotive domain expertise
-5. When uncertain, score CONSERVATIVELY (precision over recall)
+**CRITICAL: DISQUALIFYING FACTORS** (Automatic LOW score if ANY apply):
+1. ❌ Different subsystems (Braking ≠ Infotainment, Powertrain ≠ Safety, Electrical ≠ Mechanical)
+2. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
+3. ❌ Different languages without clear translation (German ≠ English unless obvious equivalent)
+4. ❌ Different components (Rotors ≠ Pads, Engine ≠ Transmission, Display ≠ Camera)
+5. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior)
+6. ❌ Vague semantic similarity without functional equivalence
 
 **TARGET FEATURE**:
 Name: {target_feature_name}
@@ -500,25 +530,53 @@ Name: {target_feature_name}
 **CANDIDATES TO EVALUATE**:
 {candidates_text}
 
-**EVALUATION CRITERIA** (Technical Precision):
-- Technical equivalence: Same function and compatible specifications
-- Subsystem alignment: Must belong to same vehicle subsystem (powertrain ≠ infotainment)
-- Unit compatibility: "cc" = "cm³" ✓, but "Torque (Nm)" ≠ "Power (HP)" ✗
-- OEM context: Proprietary features (e.g., BMW "iDrive", Mercedes "MBUX") need exact equivalents for high scores
-- Generic features: Standard features (Airbags, Engine Capacity) can match across OEMs
-- Functional purpose: Features must serve the same technical purpose
+**STRICT EVALUATION PROCESS**:
+Step 1: Identify target's subsystem (Powertrain, Braking, Safety, Infotainment, ADAS, Chassis, Body, Electrical, etc.)
+Step 2: For EACH candidate:
+   a) Does candidate belong to SAME subsystem? If NO → Score 0-20
+   b) Does candidate serve SAME functional purpose? If NO → Score 0-30
+   c) Are specifications compatible? If NO → Score 0-40
+   d) Only if YES to all: Consider 70+ score
+Step 3: Apply conservative scoring
 
-**SCORING GUIDE** (Conservative):
-- 90-100: TRUE technical equivalents (same function, same subsystem, compatible specs)
-- 70-89: Related subsystem, clear technical connection, but distinct features
-- 50-69: Weak relationship, different technical purpose or incompatible
-- 0-49: No meaningful technical connection or different subsystems
+**NEGATIVE EXAMPLES** (What NOT to match - Score 0-10):
+- "Brake Rotors" ≠ "Netztrennwan" (Braking ≠ Electrical, different subsystems)
+- "Engine Capacity" ≠ "Torque" (Capacity ≠ Force, different measurements)
+- "Airbags" ≠ "Seat Belts" (Both safety, but different components)
+- "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions)
+- "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components)
+
+**SUBSYSTEM TAXONOMY** (Features must match subsystem):
+- Powertrain: Engine, Transmission, Drivetrain, Fuel System
+- Braking: Rotors, Pads, Calipers, ABS, Brake Assist
+- Safety: Airbags, Seat Belts, Collision Warning, Emergency Brake
+- Infotainment: Display, Audio, Navigation, Connectivity
+- ADAS: Cameras, Sensors, Autopilot, Lane Assist, Parking Assist
+- Chassis: Suspension, Wheels, Tires, Steering
+- Electrical: Battery, Charging, Wiring, Fuses, Network Components
+- Body: Doors, Windows, Roof, Paint, Trim
+
+**SCORING GUIDE** (VERY Conservative):
+- 95-100: IDENTICAL features (exact same component, just different wording)
+- 85-94: TRUE functional equivalents (same subsystem, same function, compatible specs)
+- 70-84: Related features within same subsystem (e.g., "ABS" and "Brake Assist")
+- 40-69: Same subsystem but different components/functions
+- 20-39: Different subsystems but vague similarity
+- 0-19: Completely unrelated or different subsystems
+
+**VERIFICATION CHECKLIST** (Must pass ALL for 85+ score):
+✓ Same subsystem?
+✓ Same functional purpose?
+✓ Same measurement type (if applicable)?
+✓ Compatible specifications?
+✓ Clear technical equivalence (not just semantic similarity)?
 
 **CRITICAL RULES**:
-- Be STRICT: Only high scores (90+) for true technical equivalents
-- Identify disqualifying factors: different units, subsystems, or technical context
-- OEM proprietary features rarely match across brands unless functionally identical
-- When in doubt, score LOW - precision is critical
+- Most candidates will score 0-50 (this is NORMAL and EXPECTED)
+- Scores 90+ should be RARE (only true equivalents)
+- Different subsystems = automatic score <20
+- When uncertain about equivalence, score 30-50 (not 70-80)
+- Precision is CRITICAL - false positives are worse than false negatives
 - Evaluate EACH candidate independently
 
 Evaluate ALL {len(candidates)} candidates and provide your response as a JSON object with this exact structure:
