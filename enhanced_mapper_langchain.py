@@ -722,6 +722,30 @@ Provide ONLY the JSON object, no additional text or formatting.
         else:
             return MatchQuality.POOR
 
+    def _calculate_confidence(self, candidate: MappedCandidate) -> float:
+        """
+        Calculate normalized confidence score (0-1) with 2 decimal places.
+
+        Logic:
+        - If evaluated (has context_matching_score): normalize to 0-1 (score/100)
+        - If not evaluated (auto-accepted): use similarity_score
+
+        Args:
+            candidate: Candidate with scores
+
+        Returns:
+            Confidence score between 0.0 and 1.0, rounded to 2 decimal places
+        """
+        if candidate.context_matching_score is not None:
+            # Evaluated: normalize context_matching_score (0-100) to (0-1)
+            confidence = candidate.context_matching_score / 100.0
+        else:
+            # Not evaluated (auto-accepted): use similarity_score
+            confidence = candidate.similarity_score
+
+        # Round to 2 decimal places
+        return round(confidence, 2)
+
     def _evaluate_candidates_individually(
         self,
         feature: FeatureMapping,
@@ -752,6 +776,7 @@ Provide ONLY the JSON object, no additional text or formatting.
                 # Update candidate with evaluation results
                 candidate.context_matching_score = evaluation.context_matching_score
                 candidate.match_quality = self._classify_quality(evaluation.context_matching_score)
+                candidate.confidence = self._calculate_confidence(candidate)
                 candidate.evaluated = True
                 candidate.llm_reasoning = evaluation.reasoning
 
@@ -768,8 +793,8 @@ Provide ONLY the JSON object, no additional text or formatting.
                 emoji = quality_emoji.get(candidate.match_quality, "❓")
 
                 self.logger.info(
-                    f"      {emoji} Score: {candidate.context_matching_score}/100 "
-                    f"({candidate.match_quality.value})"
+                    f"      {emoji} Context: {candidate.context_matching_score}/100, "
+                    f"Confidence: {candidate.confidence:.2f} ({candidate.match_quality.value})"
                 )
                 self.logger.debug(f"      💭 Reasoning: {evaluation.reasoning[:100]}...")
 
@@ -783,6 +808,7 @@ Provide ONLY the JSON object, no additional text or formatting.
                 # Fallback: assign neutral score
                 candidate.context_matching_score = 50
                 candidate.match_quality = MatchQuality.NEEDS_REVIEW
+                candidate.confidence = self._calculate_confidence(candidate)
                 candidate.evaluated = True
                 candidate.llm_reasoning = f"Evaluation failed: {str(e)}"
 
@@ -826,6 +852,7 @@ Provide ONLY the JSON object, no additional text or formatting.
         for candidate in above_threshold:
             candidate.evaluated = False
             candidate.match_quality = MatchQuality.NOT_EVALUATED
+            candidate.confidence = self._calculate_confidence(candidate)
             candidate.llm_reasoning = f"High similarity ({candidate.similarity_score:.3f}) - auto-accepted without LLM evaluation"
             self.stats["candidates_auto_accepted"] += 1
 
@@ -869,6 +896,7 @@ Provide ONLY the JSON object, no additional text or formatting.
                     for idx, (candidate, evaluation) in enumerate(zip(candidates_to_evaluate, evaluations), 1):
                         candidate.context_matching_score = evaluation.context_matching_score
                         candidate.match_quality = self._classify_quality(evaluation.context_matching_score)
+                        candidate.confidence = self._calculate_confidence(candidate)
                         candidate.evaluated = True
                         candidate.llm_reasoning = evaluation.reasoning
                         self.stats["candidates_evaluated"] += 1
@@ -884,8 +912,8 @@ Provide ONLY the JSON object, no additional text or formatting.
 
                         self.logger.info(
                             f"  [{idx}/{len(candidates_to_evaluate)}] {candidate.metadata.feature_name} "
-                            f"(similarity: {candidate.similarity_score:.3f}) "
-                            f"{emoji} Score: {candidate.context_matching_score}/100 ({candidate.match_quality.value})"
+                            f"(similarity: {candidate.similarity_score:.2f}) "
+                            f"{emoji} Context: {candidate.context_matching_score}/100, Confidence: {candidate.confidence:.2f} ({candidate.match_quality.value})"
                         )
 
                         # Special highlight for semantic matches despite low similarity
