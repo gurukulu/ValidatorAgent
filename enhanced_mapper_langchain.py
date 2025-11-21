@@ -101,6 +101,7 @@ class BedrockFeatureMapper:
     DEFAULT_MAX_RETRIES = 3
     DEFAULT_BATCH_SIZE = 10  # Max candidates per batch LLM call
     DEFAULT_EVALUATE_ALL = True  # Evaluate ALL candidates below threshold
+    DEFAULT_SKIP_GOOD_FEATURES = False  # Skip features with good similarity matches
     COST_PER_EVALUATION = 0.0003  # Estimated cost in USD (single call)
     COST_PER_BATCH_CALL = 0.0008  # Estimated cost for batch call (amortized)
 
@@ -113,6 +114,7 @@ class BedrockFeatureMapper:
         batch_size: int = DEFAULT_BATCH_SIZE,
         use_batch_evaluation: bool = True,
         evaluate_all: bool = DEFAULT_EVALUATE_ALL,
+        skip_features_with_good_matches: bool = DEFAULT_SKIP_GOOD_FEATURES,
         quality_thresholds: Optional[QualityThresholds] = None,
         log_level: int = logging.INFO,
     ):
@@ -127,6 +129,7 @@ class BedrockFeatureMapper:
             batch_size: Max candidates per batch LLM call (default: 10)
             use_batch_evaluation: Enable batch evaluation to save tokens (default: True)
             evaluate_all: Evaluate ALL candidates below threshold, ignore max limit (default: True)
+            skip_features_with_good_matches: Skip features where highest similarity >= threshold (default: False)
             quality_thresholds: Custom quality thresholds
             log_level: Logging level
         """
@@ -139,6 +142,7 @@ class BedrockFeatureMapper:
         self.batch_size = batch_size
         self.use_batch_evaluation = use_batch_evaluation
         self.evaluate_all = evaluate_all
+        self.skip_features_with_good_matches = skip_features_with_good_matches
         self.quality_thresholds = quality_thresholds or QualityThresholds()
 
         # Statistics
@@ -147,6 +151,7 @@ class BedrockFeatureMapper:
             "total_candidates": 0,
             "candidates_evaluated": 0,
             "candidates_auto_accepted": 0,
+            "features_skipped": 0,  # Features skipped due to good matches
             "llm_calls": 0,
             "batch_llm_calls": 0,
             "individual_llm_calls": 0,
@@ -166,6 +171,7 @@ class BedrockFeatureMapper:
             self.logger.info(f"🎯 Max Candidates to Evaluate: {self.max_candidates_to_evaluate}")
         self.logger.info(f"📦 Batch Evaluation: {'Enabled' if self.use_batch_evaluation else 'Disabled'} "
                         f"(batch size: {self.batch_size})")
+        self.logger.info(f"⏭️  Skip Features with Good Matches: {'Enabled' if self.skip_features_with_good_matches else 'Disabled'}")
         self.logger.info(f"✨ Quality Thresholds: Auto-accept={self.quality_thresholds.auto_accept}, "
                         f"Review={self.quality_thresholds.manual_review}, "
                         f"Reject={self.quality_thresholds.reject}")
@@ -834,6 +840,30 @@ Provide ONLY the JSON object, no additional text or formatting.
             self.logger.warning("⚠️ No candidates found for this feature")
             return feature
 
+        # Check if we should skip this feature (feature-level filtering)
+        if self.skip_features_with_good_matches and feature.mapped_list:
+            max_similarity = max(c.similarity_score for c in feature.mapped_list)
+            if max_similarity >= self.similarity_threshold:
+                self.logger.info(
+                    f"⏭️  Skipping feature - highest similarity ({max_similarity:.3f}) >= threshold ({self.similarity_threshold})"
+                )
+                # Process all candidates without LLM, assign confidence scores
+                for candidate in feature.mapped_list:
+                    candidate.evaluated = False
+                    candidate.match_quality = MatchQuality.NOT_EVALUATED
+                    candidate.confidence = self._calculate_confidence(candidate)
+                    candidate.llm_reasoning = (
+                        f"Feature skipped - highest similarity ({max_similarity:.3f}) >= threshold"
+                    )
+                    self.stats["candidates_auto_accepted"] += 1
+
+                # Track that we skipped this feature
+                self.stats["features_skipped"] += 1
+
+                # Select best match and return
+                self._select_best_match(feature)
+                return feature
+
         # Split candidates by threshold
         above_threshold = []
         below_threshold = []
@@ -1150,6 +1180,8 @@ Provide ONLY the JSON object, no additional text or formatting.
         self.logger.info(f"📦 Total Candidates: {summary.total_candidates}")
         self.logger.info(f"🤖 Candidates Evaluated by LLM: {summary.candidates_evaluated}")
         self.logger.info(f"⚡ Candidates Auto-Accepted: {summary.candidates_auto_accepted}")
+        if self.stats["features_skipped"] > 0:
+            self.logger.info(f"⏭️  Features Skipped (good matches): {self.stats['features_skipped']}")
         self.logger.info("")
         self.logger.info("🎯 Quality Breakdown:")
         self.logger.info(f"  🌟 Excellent Matches: {summary.features_with_excellent_matches}")
@@ -1198,6 +1230,9 @@ Examples:
 
   # Custom threshold
   python enhanced_mapper_langchain.py input.json --threshold 0.80
+
+  # Skip features with good matches (only process features with all candidates below threshold)
+  python enhanced_mapper_langchain.py input.json --skip-features-with-good-matches
 
   # Limit to first 10 candidates (instead of evaluating all)
   python enhanced_mapper_langchain.py input.json --no-evaluate-all --max-candidates 10
@@ -1256,6 +1291,11 @@ Examples:
         help="Limit to max-candidates instead of evaluating all below threshold"
     )
     parser.add_argument(
+        "--skip-features-with-good-matches",
+        action="store_true",
+        help="Skip entire feature if highest similarity >= threshold (only process features with all candidates below threshold)"
+    )
+    parser.add_argument(
         "--region",
         type=str,
         default="eu-central-1",
@@ -1302,6 +1342,7 @@ Examples:
             batch_size=args.batch_size,
             use_batch_evaluation=not args.no_batch,
             evaluate_all=not args.no_evaluate_all,
+            skip_features_with_good_matches=args.skip_features_with_good_matches,
             log_level=log_level,
         )
 
