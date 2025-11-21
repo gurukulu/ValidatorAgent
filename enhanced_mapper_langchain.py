@@ -408,11 +408,13 @@ specializing in powertrain, safety systems, infotainment, ADAS, and chassis tech
 MOST candidates will NOT match - only TRUE technical equivalents deserve high scores.
 
 **CRITICAL: DISQUALIFYING FACTORS** (Automatic LOW score if ANY apply):
-1. ❌ Different subsystems (Braking ≠ Infotainment, Powertrain ≠ Safety, Electrical ≠ Mechanical)
-2. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
-3. ❌ Different components (Rotors ≠ Pads, Engine ≠ Transmission, Display ≠ Camera)
-4. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior)
-5. ❌ Vague semantic similarity without functional equivalence
+1. ❌ Different subsystems (Braking ≠ Infotainment, Safety ≠ Recording, Powertrain ≠ ADAS, Electrical ≠ Mechanical)
+2. ❌ Different component types (Airbag ≠ Camera, Engine ≠ Sensor, Display ≠ Airbag, Recording device ≠ Protection device)
+3. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
+4. ❌ Different functional categories (Protection ≠ Recording, Active ≠ Passive, Prevention ≠ Documentation)
+5. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior, Mechanical ≠ Electronic)
+6. ❌ Vague semantic similarity without functional equivalence
+7. ❌ "Traffic safety" connection without component equivalence (Airbags ≠ Dashcam just because both relate to traffic)
 
 **MULTILINGUAL MATCHING**:
 ✅ Features in different languages CAN match IF they are semantic equivalents
@@ -434,32 +436,57 @@ OEM: {candidate.oem}
 
 **STRICT EVALUATION PROCESS**:
 Step 1: Translate any non-English terms to English (e.g., "Netztrennwan" → "Network Separation Wall")
-Step 2: Identify target's subsystem (Powertrain, Braking, Safety, Infotainment, ADAS, Chassis, Body, Electrical, etc.)
-Step 3: For candidate:
-   a) Does candidate belong to SAME subsystem? If NO → Score 0-20
-   b) Does candidate serve SAME functional purpose? If NO → Score 0-30
-   c) Are specifications compatible? If NO → Score 0-40
-   d) Only if YES to all: Consider 70+ score
-Step 4: Apply conservative scoring
+Step 2: Identify component types:
+   - Is target an Airbag, Camera, Engine, Sensor, Display, etc.?
+   - Is candidate an Airbag, Camera, Engine, Sensor, Display, etc.?
+   - If different component types (Airbag ≠ Camera) → Score 0-10
+Step 3: Identify target's subsystem (Powertrain, Braking, Safety-Protection, Recording, ADAS, etc.)
+Step 4: For candidate:
+   a) Same component type? If NO → Score 0-10
+   b) Same subsystem? If NO → Score 0-20
+   c) Same functional purpose? If NO → Score 0-30
+   d) Compatible specifications? If NO → Score 0-40
+   e) Only if YES to all: Consider 70+ score
+Step 5: Apply conservative scoring
 
 **NEGATIVE EXAMPLES** (What NOT to match - Score 0-10):
+- "Pedestrian Airbags" ≠ "Dashcam/Universal Traffic Recorder" (Safety/Airbag ≠ Recording/Camera, Protection ≠ Documentation)
 - "Brake Rotors" ≠ "Netztrennwan/Network Separation Wall" (Braking ≠ Electrical, different subsystems)
 - "Engine Capacity" ≠ "Torque" (Capacity ≠ Force, different measurements)
-- "Airbags" ≠ "Seat Belts" (Both safety, but different components)
-- "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions)
-- "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components)
+- "Airbags" ≠ "Seat Belts" (Both safety, but different components: Airbag ≠ Belt)
+- "Airbags" ≠ "Camera" (Protection device ≠ Recording device, fundamentally different)
+- "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions: Navigation ≠ Sensing)
+- "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components: Seat ≠ Wheel)
 
 **POSITIVE CROSS-LANGUAGE EXAMPLES** (Score 95-100):
 - "Motor" (German) = "Engine" (English) → Same component, same subsystem ✓
 - "Bremsscheiben" (German) = "Brake Rotors" (English) → Same component, same subsystem ✓
 - "Hubraum" (German) = "Engine Displacement" (English) → Same measurement, same subsystem ✓
 
+**COMMON CONFUSIONS TO AVOID** (These are NOT matches despite seeming related):
+1. Protection vs Recording:
+   - Airbags (active protection, deploys in accident) ≠ Dashcam (passive recording, documents accidents)
+   - Just because both relate to "accidents" doesn't make them equivalent!
+2. Active vs Passive Safety:
+   - Active safety (prevents accidents): Brakes, ADAS, Collision Warning
+   - Passive safety (protects in accidents): Airbags, Seat Belts, Crumple Zones
+   - Recording devices: Dashcams, Event Recorders (document only, don't protect)
+3. Component Type Confusion:
+   - Camera ≠ Airbag (Recording ≠ Protection, Sensor ≠ Physical safety device)
+   - Sensor ≠ Actuator (Detects ≠ Acts)
+   - Display ≠ Control (Shows ≠ Controls)
+4. "Traffic Safety" is NOT equivalence:
+   - Just because two features relate to "traffic safety" doesn't mean they match
+   - Example: Pedestrian Airbags and Dashcams both relate to traffic, but are completely different components
+
 **SUBSYSTEM TAXONOMY** (Features must match subsystem - with multilingual examples):
 - Powertrain: Engine/Motor, Transmission/Getriebe, Drivetrain, Fuel System, Displacement/Hubraum
 - Braking: Rotors/Bremsscheiben, Pads/Bremsbeläge, Calipers, ABS, Brake Assist
-- Safety: Airbags, Seat Belts/Sicherheitsgurte, Collision Warning, Emergency Brake
+- Safety (Passive Protection): Airbags (Front, Side, Pedestrian, Curtain), Seat Belts/Sicherheitsgurte, Crumple Zones, Headrests
+- Safety (Active Prevention): Collision Warning, Emergency Brake, Lane Keeping, Blind Spot Detection
+- Recording/Documentation: Dashcam, Event Recorder, Traffic Recorder, Drive Recorder (NOT safety devices, only document)
 - Infotainment: Display, Audio, Navigation, Connectivity, Media System
-- ADAS: Cameras, Sensors, Autopilot, Lane Assist, Parking Assist
+- ADAS: Cameras (for assistance, not recording), Sensors, Autopilot, Lane Assist, Parking Assist
 - Chassis: Suspension, Wheels/Räder, Tires/Reifen, Steering/Lenkung
 - Electrical: Battery/Batterie, Charging, Wiring, Fuses, Network Components/Netztrennwan
 - Body: Doors/Türen, Windows/Fenster, Roof/Dach, Paint/Lackierung, Trim
@@ -473,18 +500,23 @@ Step 4: Apply conservative scoring
 - 0-19: Completely unrelated or different subsystems
 
 **VERIFICATION CHECKLIST** (Must pass ALL for 85+ score):
-✓ Same subsystem?
-✓ Same functional purpose?
-✓ Same measurement type (if applicable)?
+✓ Same component type? (Airbag = Airbag, Camera = Camera, Engine = Engine)
+✓ Same subsystem? (Safety ≠ Recording, Braking ≠ Electrical)
+✓ Same functional purpose? (Protection ≠ Documentation, Recording ≠ Prevention)
+✓ Same measurement type (if applicable)? (Capacity ≠ Force, Volume ≠ Power)
 ✓ Compatible specifications?
 ✓ Clear technical equivalence (not just semantic similarity)?
+✓ NOT just "related to traffic/accidents"?
 
 **CRITICAL RULES**:
 - Most candidates will score 0-50 (this is NORMAL and EXPECTED)
 - Scores 90+ should be RARE (only true equivalents)
-- Different subsystems = automatic score <20
+- Different component types = automatic score <10 (Airbag ≠ Camera, ALWAYS!)
+- Different subsystems = automatic score <20 (Safety ≠ Recording, Protection ≠ Documentation)
+- "Related to traffic/accidents" is NOT equivalence (Airbags and Dashcams both relate to accidents, but score 0-10)
 - When uncertain about equivalence, score 30-50 (not 70-80)
 - Precision is CRITICAL - false positives are worse than false negatives
+- ASK YOURSELF: "Are these the SAME type of component?" If NO → Score <20
 
 Evaluate the candidate and provide your response as a JSON object with this exact structure:
 {{
@@ -533,11 +565,13 @@ specializing in powertrain, safety systems, infotainment, ADAS, and chassis tech
 MOST candidates will NOT match - only TRUE technical equivalents deserve high scores.
 
 **CRITICAL: DISQUALIFYING FACTORS** (Automatic LOW score if ANY apply):
-1. ❌ Different subsystems (Braking ≠ Infotainment, Powertrain ≠ Safety, Electrical ≠ Mechanical)
-2. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
-3. ❌ Different components (Rotors ≠ Pads, Engine ≠ Transmission, Display ≠ Camera)
-4. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior)
-5. ❌ Vague semantic similarity without functional equivalence
+1. ❌ Different subsystems (Braking ≠ Infotainment, Safety ≠ Recording, Powertrain ≠ ADAS, Electrical ≠ Mechanical)
+2. ❌ Different component types (Airbag ≠ Camera, Engine ≠ Sensor, Display ≠ Airbag, Recording device ≠ Protection device)
+3. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
+4. ❌ Different functional categories (Protection ≠ Recording, Active ≠ Passive, Prevention ≠ Documentation)
+5. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior, Mechanical ≠ Electronic)
+6. ❌ Vague semantic similarity without functional equivalence
+7. ❌ "Traffic safety" connection without component equivalence (Airbags ≠ Dashcam just because both relate to traffic)
 
 **MULTILINGUAL MATCHING**:
 ✅ Features in different languages CAN match IF they are semantic equivalents
@@ -564,23 +598,43 @@ Step 2: For EACH candidate:
 Step 3: Apply conservative scoring
 
 **NEGATIVE EXAMPLES** (What NOT to match - Score 0-10):
+- "Pedestrian Airbags" ≠ "Dashcam/Universal Traffic Recorder" (Safety/Airbag ≠ Recording/Camera, Protection ≠ Documentation)
 - "Brake Rotors" ≠ "Netztrennwan/Network Separation Wall" (Braking ≠ Electrical, different subsystems)
 - "Engine Capacity" ≠ "Torque" (Capacity ≠ Force, different measurements)
-- "Airbags" ≠ "Seat Belts" (Both safety, but different components)
-- "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions)
-- "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components)
+- "Airbags" ≠ "Seat Belts" (Both safety, but different components: Airbag ≠ Belt)
+- "Airbags" ≠ "Camera" (Protection device ≠ Recording device, fundamentally different)
+- "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions: Navigation ≠ Sensing)
+- "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components: Seat ≠ Wheel)
 
 **POSITIVE CROSS-LANGUAGE EXAMPLES** (Score 95-100):
 - "Motor" (German) = "Engine" (English) → Same component, same subsystem ✓
 - "Bremsscheiben" (German) = "Brake Rotors" (English) → Same component, same subsystem ✓
 - "Hubraum" (German) = "Engine Displacement" (English) → Same measurement, same subsystem ✓
 
+**COMMON CONFUSIONS TO AVOID** (These are NOT matches despite seeming related):
+1. Protection vs Recording:
+   - Airbags (active protection, deploys in accident) ≠ Dashcam (passive recording, documents accidents)
+   - Just because both relate to "accidents" doesn't make them equivalent!
+2. Active vs Passive Safety:
+   - Active safety (prevents accidents): Brakes, ADAS, Collision Warning
+   - Passive safety (protects in accidents): Airbags, Seat Belts, Crumple Zones
+   - Recording devices: Dashcams, Event Recorders (document only, don't protect)
+3. Component Type Confusion:
+   - Camera ≠ Airbag (Recording ≠ Protection, Sensor ≠ Physical safety device)
+   - Sensor ≠ Actuator (Detects ≠ Acts)
+   - Display ≠ Control (Shows ≠ Controls)
+4. "Traffic Safety" is NOT equivalence:
+   - Just because two features relate to "traffic safety" doesn't mean they match
+   - Example: Pedestrian Airbags and Dashcams both relate to traffic, but are completely different components
+
 **SUBSYSTEM TAXONOMY** (Features must match subsystem - with multilingual examples):
 - Powertrain: Engine/Motor, Transmission/Getriebe, Drivetrain, Fuel System, Displacement/Hubraum
 - Braking: Rotors/Bremsscheiben, Pads/Bremsbeläge, Calipers, ABS, Brake Assist
-- Safety: Airbags, Seat Belts/Sicherheitsgurte, Collision Warning, Emergency Brake
+- Safety (Passive Protection): Airbags (Front, Side, Pedestrian, Curtain), Seat Belts/Sicherheitsgurte, Crumple Zones, Headrests
+- Safety (Active Prevention): Collision Warning, Emergency Brake, Lane Keeping, Blind Spot Detection
+- Recording/Documentation: Dashcam, Event Recorder, Traffic Recorder, Drive Recorder (NOT safety devices, only document)
 - Infotainment: Display, Audio, Navigation, Connectivity, Media System
-- ADAS: Cameras, Sensors, Autopilot, Lane Assist, Parking Assist
+- ADAS: Cameras (for assistance, not recording), Sensors, Autopilot, Lane Assist, Parking Assist
 - Chassis: Suspension, Wheels/Räder, Tires/Reifen, Steering/Lenkung
 - Electrical: Battery/Batterie, Charging, Wiring, Fuses, Network Components/Netztrennwan
 - Body: Doors/Türen, Windows/Fenster, Roof/Dach, Paint/Lackierung, Trim
@@ -594,18 +648,23 @@ Step 3: Apply conservative scoring
 - 0-19: Completely unrelated or different subsystems
 
 **VERIFICATION CHECKLIST** (Must pass ALL for 85+ score):
-✓ Same subsystem?
-✓ Same functional purpose?
-✓ Same measurement type (if applicable)?
+✓ Same component type? (Airbag = Airbag, Camera = Camera, Engine = Engine)
+✓ Same subsystem? (Safety ≠ Recording, Braking ≠ Electrical)
+✓ Same functional purpose? (Protection ≠ Documentation, Recording ≠ Prevention)
+✓ Same measurement type (if applicable)? (Capacity ≠ Force, Volume ≠ Power)
 ✓ Compatible specifications?
 ✓ Clear technical equivalence (not just semantic similarity)?
+✓ NOT just "related to traffic/accidents"?
 
 **CRITICAL RULES**:
 - Most candidates will score 0-50 (this is NORMAL and EXPECTED)
 - Scores 90+ should be RARE (only true equivalents)
-- Different subsystems = automatic score <20
+- Different component types = automatic score <10 (Airbag ≠ Camera, ALWAYS!)
+- Different subsystems = automatic score <20 (Safety ≠ Recording, Protection ≠ Documentation)
+- "Related to traffic/accidents" is NOT equivalence (Airbags and Dashcams both relate to accidents, but score 0-10)
 - When uncertain about equivalence, score 30-50 (not 70-80)
 - Precision is CRITICAL - false positives are worse than false negatives
+- ASK YOURSELF: "Are these the SAME type of component?" If NO → Score <20
 - Evaluate EACH candidate independently
 
 Evaluate ALL {len(candidates)} candidates and provide your response as a JSON object with this exact structure:
