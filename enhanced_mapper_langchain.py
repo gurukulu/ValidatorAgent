@@ -366,6 +366,37 @@ class BedrockFeatureMapper:
         match = re.match(r'^([A-Za-z\-]+)', car_model.strip())
         return match.group(1) if match else car_model.split()[0] if car_model.split() else ""
 
+    def _extract_featureid_context(self, sourcetext_featureid: Optional[str]) -> str:
+        """
+        Extract contextual information from sourcetext_featureid.
+
+        Extracts the text after the first colon (:) until the pipe (|).
+        This provides additional context about what the feature represents.
+
+        Examples:
+            "37-keyword-2+Keyword:Electronic differential | Domain: automotive"
+                → "Electronic differential"
+            "BMW-6-keyword-1+Keyword:Engine Displacement | Domain: automotive | Brand: BMW"
+                → "Engine Displacement"
+            "BMW-7-featurename-1+Feature_name:Maximum Power | Domain: automotive"
+                → "Maximum Power"
+
+        Args:
+            sourcetext_featureid: Source text feature identifier string
+
+        Returns:
+            Extracted context string or empty string if not found
+        """
+        if not sourcetext_featureid:
+            return ""
+
+        # Find text after first ":" until "|"
+        match = re.search(r':([^|]+)', sourcetext_featureid)
+        if match:
+            return match.group(1).strip()
+
+        return ""
+
     def _create_bias_free_candidate(self, candidate: MappedCandidate) -> BiasFreeCandidateInput:
         """
         Create bias-free candidate data for LLM evaluation.
@@ -384,6 +415,7 @@ class BedrockFeatureMapper:
             feature_value=candidate.metadata.feature_value or "",
             notes=candidate.metadata.notes or "",
             oem=self._extract_oem_from_car_model(candidate.metadata.car_model),
+            sourcetext_featureid_context=self._extract_featureid_context(candidate.sourcetext_featureid),
         )
 
     def _build_evaluation_prompt(
@@ -401,32 +433,19 @@ class BedrockFeatureMapper:
         Returns:
             Formatted prompt string
         """
-        prompt = f"""You are a senior automotive engineer with 15+ years of experience in vehicle systems design,
-specializing in powertrain, safety systems, infotainment, ADAS, and chassis technologies.
+        # Extract feature ID context for additional context
+        featureid_context = f"\nFeature ID Context: {candidate.sourcetext_featureid_context}" if candidate.sourcetext_featureid_context else ""
 
-**YOUR ROLE**: Critically evaluate this feature match with EXTREME PRECISION. Reject non-matches decisively.
-MOST candidates will NOT match - only TRUE technical equivalents deserve high scores.
+        prompt = f"""You are a senior automotive engineer evaluating whether a candidate vehicle feature matches a target feature from Jaguar Land Rover (JLR).
 
-**CRITICAL: DISQUALIFYING FACTORS** (Automatic LOW score if ANY apply):
-1. ❌ Different subsystems (Braking ≠ Infotainment, Safety ≠ Recording, Powertrain ≠ ADAS, Electrical ≠ Mechanical)
-2. ❌ Different component types (Airbag ≠ Camera, Engine ≠ Sensor, Display ≠ Airbag, Recording device ≠ Protection device)
-3. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
-4. ❌ Different functional categories (Protection ≠ Recording, Active ≠ Passive, Prevention ≠ Documentation)
-5. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior, Mechanical ≠ Electronic)
-6. ❌ Vague semantic similarity without functional equivalence
-7. ❌ "Traffic safety" connection without component equivalence (Airbags ≠ Dashcam just because both relate to traffic)
+**CRITICAL PRINCIPLE**: Most candidates will NOT match. Only assign scores 85+ when you have HIGH CONFIDENCE both features represent the same automotive component within the same feature group. Default to rejection - false positives are costly.
 
-**MULTILINGUAL MATCHING**:
-✅ Features in different languages CAN match IF they are semantic equivalents
-✅ Examples of valid cross-language matches:
-   - "Motor" (German) = "Engine" (English) → Score 95-100 ✓
-   - "Bremsscheiben" (German) = "Brake Rotors" (English) → Score 95-100 ✓
-   - "Getriebe" (German) = "Transmission" (English) → Score 95-100 ✓
-✅ ALWAYS translate non-English terms to English in your reasoning
-✅ Score based on semantic/technical equivalence, NOT language difference
+---
 
-**TARGET FEATURE**:
-Name: {target_feature_name}
+## INPUT DATA
+
+**TARGET FEATURE** (from JLR):
+Name: {target_feature_name}{featureid_context}
 
 **CANDIDATE FEATURE**:
 Name: {candidate.feature_name}
@@ -434,101 +453,198 @@ Value: {candidate.feature_value}
 Notes: {candidate.notes}
 OEM: {candidate.oem}
 
-**STRICT EVALUATION PROCESS**:
-Step 1: Translate any non-English terms to English (e.g., "Netztrennwan" → "Network Separation Wall")
-Step 2: Identify component types:
-   - Is target an Airbag, Camera, Engine, Sensor, Display, etc.?
-   - Is candidate an Airbag, Camera, Engine, Sensor, Display, etc.?
-   - If different component types (Airbag ≠ Camera) → Score 0-10
-Step 3: Identify target's subsystem (Powertrain, Braking, Safety-Protection, Recording, ADAS, etc.)
-Step 4: For candidate:
-   a) Same component type? If NO → Score 0-10
-   b) Same subsystem? If NO → Score 0-20
-   c) Same functional purpose? If NO → Score 0-30
-   d) Compatible specifications? If NO → Score 0-40
-   e) Only if YES to all: Consider 70+ score
-Step 5: Apply conservative scoring
+---
 
-**NEGATIVE EXAMPLES** (What NOT to match - Score 0-10):
-- "Pedestrian Airbags" ≠ "Dashcam/Universal Traffic Recorder" (Safety/Airbag ≠ Recording/Camera, Protection ≠ Documentation)
-- "Brake Rotors" ≠ "Netztrennwan/Network Separation Wall" (Braking ≠ Electrical, different subsystems)
-- "Engine Capacity" ≠ "Torque" (Capacity ≠ Force, different measurements)
-- "Airbags" ≠ "Seat Belts" (Both safety, but different components: Airbag ≠ Belt)
-- "Airbags" ≠ "Camera" (Protection device ≠ Recording device, fundamentally different)
-- "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions: Navigation ≠ Sensing)
-- "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components: Seat ≠ Wheel)
+## EVALUATION PROCESS
 
-**POSITIVE CROSS-LANGUAGE EXAMPLES** (Score 95-100):
-- "Motor" (German) = "Engine" (English) → Same component, same subsystem ✓
-- "Bremsscheiben" (German) = "Brake Rotors" (English) → Same component, same subsystem ✓
-- "Hubraum" (German) = "Engine Displacement" (English) → Same measurement, same subsystem ✓
+### STEP 1: IDENTIFY FEATURE GROUPS
 
-**COMMON CONFUSIONS TO AVOID** (These are NOT matches despite seeming related):
-1. Protection vs Recording:
-   - Airbags (active protection, deploys in accident) ≠ Dashcam (passive recording, documents accidents)
-   - Just because both relate to "accidents" doesn't make them equivalent!
-2. Active vs Passive Safety:
-   - Active safety (prevents accidents): Brakes, ADAS, Collision Warning
-   - Passive safety (protects in accidents): Airbags, Seat Belts, Crumple Zones
-   - Recording devices: Dashcams, Event Recorders (document only, don't protect)
-3. Component Type Confusion:
-   - Camera ≠ Airbag (Recording ≠ Protection, Sensor ≠ Physical safety device)
-   - Sensor ≠ Actuator (Detects ≠ Acts)
-   - Display ≠ Control (Shows ≠ Controls)
-4. "Traffic Safety" is NOT equivalence:
-   - Just because two features relate to "traffic safety" doesn't mean they match
-   - Example: Pedestrian Airbags and Dashcams both relate to traffic, but are completely different components
+**For TARGET**: Determine which JLR feature group it belongs to from this taxonomy:
 
-**SUBSYSTEM TAXONOMY** (Features must match subsystem - with multilingual examples):
-- Powertrain: Engine/Motor, Transmission/Getriebe, Drivetrain, Fuel System, Displacement/Hubraum
-- Braking: Rotors/Bremsscheiben, Pads/Bremsbeläge, Calipers, ABS, Brake Assist
-- Safety (Passive Protection): Airbags (Front, Side, Pedestrian, Curtain), Seat Belts/Sicherheitsgurte, Crumple Zones, Headrests
-- Safety (Active Prevention): Collision Warning, Emergency Brake, Lane Keeping, Blind Spot Detection
-- Recording/Documentation: Dashcam, Event Recorder, Traffic Recorder, Drive Recorder (NOT safety devices, only document)
-- Infotainment: Display, Audio, Navigation, Connectivity, Media System
-- ADAS: Cameras (for assistance, not recording), Sensors, Autopilot, Lane Assist, Parking Assist
-- Chassis: Suspension, Wheels/Räder, Tires/Reifen, Steering/Lenkung
-- Electrical: Battery/Batterie, Charging, Wiring, Fuses, Network Components/Netztrennwan
-- Body: Doors/Türen, Windows/Fenster, Roof/Dach, Paint/Lackierung, Trim
+**POWERTRAIN:**
+- POWERTRAIN - BRAKES (brake components, brake systems)
+- POWERTRAIN - DRIVING DYNAMICS (suspension, differentials, terrain systems)
+- POWERTRAIN - ENGINES (engine features, BEV acoustic systems)
+- POWERTRAIN - FUEL AND EXHAUST SYSTEMS (charging, exhaust)
+- POWERTRAIN - TRANSMISSION (gearbox, drivetrain)
 
-**SCORING GUIDE** (VERY Conservative):
-- 95-100: IDENTICAL features (exact same component, just different wording)
-- 85-94: TRUE functional equivalents (same subsystem, same function, compatible specs)
-- 70-84: Related features within same subsystem (e.g., "ABS" and "Brake Assist")
-- 40-69: Same subsystem but different components/functions
-- 20-39: Different subsystems but vague similarity
-- 0-19: Completely unrelated or different subsystems
+**EXTERIOR:**
+- EXTERIOR TRIM - ROOFS (panoramic, sunroof, convertible)
+- EXTERIOR TRIM - ORNAMENTATION (handles, window surrounds)
+- EXTERIOR TRIM - BODY STYLING (mirror caps, styling packs)
+- EXTERIOR FEATURES - GLASS AND MIRRORS (heated glass, mirror functions)
+- EXTERIOR FEATURES - TOWING EQUIPMENT (tow bars, trailer assist)
+- EXTERIOR FEATURES - LIGHTS (headlights, DRL, adaptive lighting)
+- EXTERIOR FEATURES - TAILGATE / BOOT (powered tailgate, load floor)
+- EXTERIOR FEATURES - ADDITIONAL FEATURES (side steps, power socket)
 
-**VERIFICATION CHECKLIST** (Must pass ALL for 85+ score):
-✓ Same component type? (Airbag = Airbag, Camera = Camera, Engine = Engine)
-✓ Same subsystem? (Safety ≠ Recording, Braking ≠ Electrical)
-✓ Same functional purpose? (Protection ≠ Documentation, Recording ≠ Prevention)
-✓ Same measurement type (if applicable)? (Capacity ≠ Force, Volume ≠ Power)
-✓ Compatible specifications?
-✓ Clear technical equivalence (not just semantic similarity)?
-✓ NOT just "related to traffic/accidents"?
+**WHEELS:**
+- WHEELS AND TYRES - TYRES (tyre types and performance)
+- WHEELS AND TYRES - SPARE WHEELS (spare wheel options)
+- WHEELS AND TYRES - WHEELS (wheel sizes and finishes)
 
-**CRITICAL RULES**:
-- Most candidates will score 0-50 (this is NORMAL and EXPECTED)
-- Scores 90+ should be RARE (only true equivalents)
-- Different component types = automatic score <10 (Airbag ≠ Camera, ALWAYS!)
-- Different subsystems = automatic score <20 (Safety ≠ Recording, Protection ≠ Documentation)
-- "Related to traffic/accidents" is NOT equivalence (Airbags and Dashcams both relate to accidents, but score 0-10)
-- When uncertain about equivalence, score 30-50 (not 70-80)
-- Precision is CRITICAL - false positives are worse than false negatives
-- ASK YOURSELF: "Are these the SAME type of component?" If NO → Score <20
+**INTERIOR:**
+- SEATING - MATERIALS (leather types, fabric grades)
+- SEATING - FUNCTIONALITY (seat adjustments, memory, folding)
+- SEATING - CONVENIENCE (heating, cooling, cup holders)
+- SEATING - STYLES (sports seats)
+- EXTENDED INTERIOR - MATERIALS (dashboard, console materials)
+- INTERIOR TRIM - MATERIALS (veneers, finishers)
+- INTERIOR TRIM - CARPET MATS (mat types and quality)
+- INTERIOR TRIM - STEERING WHEELS (wheel materials, adjustment, heating)
+- INTERIOR TRIM - TREADPLATES (treadplate types and lighting)
+- INTERIOR TRIM - HEADLINING (headlining materials)
+- INTERIOR FEATURES - ADDITIONAL FEATURES (mirrors, sunblinds, storage covers)
+- INTERIOR FEATURES - LIGHTING (ambient lighting systems)
+- INTERIOR FEATURES - STORAGE (cooler/refrigerator compartments)
+- INTERIOR FEATURES - CLIMATE CONTROL (zone control, air quality)
 
-Evaluate the candidate and provide your response as a JSON object with this exact structure:
+**INFOTAINMENT:**
+- INFOTAINMENT - AUDIO SYSTEMS (speakers, audio quality levels)
+- INFOTAINMENT - INSTRUMENT CLUSTER (displays, dials, HUD)
+- INFOTAINMENT - ENTERTAINMENT (screens, rear entertainment)
+- INFOTAINMENT - INCONTROL SYSTEMS (connectivity, navigation, apps)
+- INFOTAINMENT - MULTIMEDIA (charging, ports, streaming)
+
+**SAFETY:**
+- SAFETY AND SECURITY - MISCELLANEOUS (TPMS, alarms, keyless entry)
+- SAFETY AND SECURITY - ADAS (cameras, parking, lane assist, cruise control, dashcam)
+- SAFETY AND SECURITY - EMERGENCY EQUIPMENT (pedestrian airbags, knee airbags)
+
+**OTHER:**
+- PAINTS - TYPES (paint finishes)
+- DERIVATIVE - WHEELBASE (wheelbase variants)
+- SPECIFICATIONS - TECHNICAL (engine specs, dimensions, performance)
+- SPECIFICATIONS - PRICE (pricing data)
+
+**For CANDIDATE**: Classify into the same taxonomy based on its technical function.
+
+---
+
+### STEP 2: TRANSLATION & COMPONENT IDENTIFICATION
+
+If candidate feature contains German terms, translate to English:
+- "Bremsscheiben" → "Brake Discs"
+- "Getriebe" → "Transmission"
+- "Motor" → "Engine"
+- "Airbag" → "Airbag"
+- "Kamera" → "Camera"
+
+Identify the **specific component or specification** being described:
+- Physical component (e.g., airbag, camera, brake disc, seat)
+- System (e.g., navigation, climate control)
+- Specification (e.g., power output, screen size)
+- Material (e.g., leather type, paint finish)
+
+---
+
+### STEP 3: APPLY MATCHING RULES
+
+**RULE 1 - Feature Group Match (MANDATORY for 70+ score)**
+Target and candidate MUST be in the same specific feature group.
+- ✓ Both in "POWERTRAIN - BRAKES"
+- ✗ One in "SAFETY - ADAS", other in "SAFETY - EMERGENCY EQUIPMENT"
+- ✗ One in "POWERTRAIN - BRAKES", other in "POWERTRAIN - TRANSMISSION"
+
+**RULE 2 - Component Type Match (MANDATORY for 85+ score)**
+Both must describe the same type of component.
+- ✓ Both are brake discs
+- ✓ Both are cameras (same component type)
+- ✗ One is airbag, other is camera (different physical components)
+- ✗ One is dashcam, other is airbag (recording device ≠ protection device)
+
+**RULE 3 - Function Match (MANDATORY for 85+ score)**
+Both must serve the same primary function.
+- ✓ Both provide driver assistance (lane keeping)
+- ✗ One protects in crash (airbag), other records events (dashcam)
+- ✗ One displays information, other controls systems
+
+**RULE 4 - Specification Compatibility (for 90+ score)**
+If numeric values exist, they must be comparable.
+- ✓ "20 inch wheels" matches "20 Zoll Räder"
+- ✗ "20 inch wheels" vs "22 inch wheels" (different specs)
+- ✗ "Engine capacity" vs "Torque" (different measurement types)
+
+---
+
+### STEP 4: SCORING DECISION
+
+**Score 95-100**: Perfect match
+- Identical component in same feature group
+- Only OEM naming/language differs
+- Specifications identical or highly compatible
+- Example: "Pedestrian Airbags" = "Fußgänger-Airbags"
+
+**Score 85-94**: Strong functional match
+- Same component type in same feature group
+- Same function and purpose
+- Specifications compatible (minor differences acceptable)
+- Example: "LED Headlights" = "LED-Scheinwerfer"
+
+**Score 70-84**: Related within same group
+- Same feature group but different variants
+- Example: "Front Airbags" vs "Side Airbags" (both in EMERGENCY EQUIPMENT)
+
+**Score 40-69**: Same high-level category, different groups
+- Example: Both under SAFETY but one in ADAS, other in EMERGENCY EQUIPMENT
+
+**Score 20-39**: Weak semantic connection only
+- Different feature groups
+- No clear technical equivalence
+
+**Score 0-19**: No meaningful relationship
+- Different categories entirely
+- No functional similarity
+
+---
+
+## AUTOMATIC DISQUALIFIERS (Score ≤20)
+
+Apply these rejection criteria - if ANY apply, score must be 20 or below:
+
+❌ **Different Feature Groups**: "SAFETY - ADAS" ≠ "SAFETY - EMERGENCY EQUIPMENT"
+❌ **Different Component Types**: Airbag ≠ Camera, Sensor ≠ Display, Engine ≠ Transmission
+❌ **Different Functions**: Protection ≠ Recording, Display ≠ Control, Sensing ≠ Actuation
+❌ **Different Measurement Types**: Volume ≠ Force, Pressure ≠ Temperature, Capacity ≠ Torque
+❌ **Cross-Category Matching**: POWERTRAIN ≠ INFOTAINMENT, SEATING ≠ LIGHTING
+
+---
+
+## CRITICAL DECISION PRINCIPLES
+
+1. **Hierarchical Matching**: Features must match at the SPECIFIC feature group level (e.g., "POWERTRAIN - BRAKES"), not just the high-level category (e.g., "POWERTRAIN")
+
+2. **Component Identity**: A camera is never an airbag. A brake disc is never a brake pad. A navigation system is never a parking sensor. Focus on what the component IS, not what it relates to.
+
+3. **Function Over Category**: "Traffic safety" is not equivalence. Dashcams and airbags both relate to traffic/accidents but serve completely different functions (recording vs. protection).
+
+4. **Language Neutrality**: German/English terminology does not affect scoring if they describe the same component.
+
+5. **OEM Variation Awareness**: Different OEMs use different names ("Pedestrian Protection System" vs "Pedestrian Airbags"), but focus on the underlying component.
+
+6. **Conservative Scoring**: When uncertain about feature group classification or component equivalence, score LOW (0-40). Better to miss a match than create a false positive.
+
+7. **Specification Precision**: "20 inch wheels" ≠ "22 inch wheels" even though both are wheels in the same group.
+
+---
+
+## OUTPUT FORMAT
+
+Return ONLY this JSON object (no markdown formatting, no additional text):
+```json
 {{
   "context_matching_score": <integer 0-100>,
-  "reasoning": "<your reasoning here - be concise, max 2-3 sentences>",
-  "key_factors": ["factor1", "factor2", ...] // 1-5 factors
+  "reasoning": "<Translate German terms. State both feature groups. Explain match/mismatch based on component type and function>",
+  "key_factors": ["factor1", "factor2", "factor3"]
 }}
+```
 
-IMPORTANT:
-- Keep reasoning concise (2-3 sentences max, under 500 characters)
-- ALWAYS translate non-English terms to English in your reasoning (e.g., "Netztrennwan (Network Separation Wall)")
-- Provide ONLY the JSON object, no additional text or formatting
+**Reasoning Requirements**:
+- Maximum 3 sentences
+- Include German→English translations if applicable
+- State both feature groups clearly
+- Explain the critical factor determining the score
+- Focus on WHY they match or don't match, not just describing them
 """
         return prompt
 
@@ -547,148 +663,244 @@ IMPORTANT:
         Returns:
             Formatted prompt string for batch evaluation
         """
+        # Extract feature ID context for the first candidate (assuming all candidates are for same target)
+        featureid_context = ""
+        if candidates and candidates[0].sourcetext_featureid_context:
+            featureid_context = f"\nFeature ID Context: {candidates[0].sourcetext_featureid_context}"
+
         # Build candidate list
         candidates_text = ""
         for idx, candidate in enumerate(candidates, 1):
+            featureid_info = f"\nFeature ID Context: {candidate.sourcetext_featureid_context}" if candidate.sourcetext_featureid_context else ""
             candidates_text += f"""
 **CANDIDATE {idx}**:
 Name: {candidate.feature_name}
 Value: {candidate.feature_value}
 Notes: {candidate.notes}
-OEM: {candidate.oem}
+OEM: {candidate.oem}{featureid_info}
 """
 
-        prompt = f"""You are a senior automotive engineer with 15+ years of experience in vehicle systems design,
-specializing in powertrain, safety systems, infotainment, ADAS, and chassis technologies.
+        prompt = f"""You are a senior automotive engineer evaluating whether candidate vehicle features match a target feature from Jaguar Land Rover (JLR).
 
-**YOUR ROLE**: Critically evaluate feature matches with EXTREME PRECISION. Reject non-matches decisively.
-MOST candidates will NOT match - only TRUE technical equivalents deserve high scores.
+**CRITICAL PRINCIPLE**: Most candidates will NOT match. Only assign scores 85+ when you have HIGH CONFIDENCE both features represent the same automotive component within the same feature group. Default to rejection - false positives are costly.
 
-**CRITICAL: DISQUALIFYING FACTORS** (Automatic LOW score if ANY apply):
-1. ❌ Different subsystems (Braking ≠ Infotainment, Safety ≠ Recording, Powertrain ≠ ADAS, Electrical ≠ Mechanical)
-2. ❌ Different component types (Airbag ≠ Camera, Engine ≠ Sensor, Display ≠ Airbag, Recording device ≠ Protection device)
-3. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
-4. ❌ Different functional categories (Protection ≠ Recording, Active ≠ Passive, Prevention ≠ Documentation)
-5. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior, Mechanical ≠ Electronic)
-6. ❌ Vague semantic similarity without functional equivalence
-7. ❌ "Traffic safety" connection without component equivalence (Airbags ≠ Dashcam just because both relate to traffic)
+---
 
-**MULTILINGUAL MATCHING**:
-✅ Features in different languages CAN match IF they are semantic equivalents
-✅ Examples of valid cross-language matches:
-   - "Motor" (German) = "Engine" (English) → Score 95-100 ✓
-   - "Bremsscheiben" (German) = "Brake Rotors" (English) → Score 95-100 ✓
-   - "Getriebe" (German) = "Transmission" (English) → Score 95-100 ✓
-✅ ALWAYS translate non-English terms to English in your reasoning
-✅ Score based on semantic/technical equivalence, NOT language difference
+## INPUT DATA
 
-**TARGET FEATURE**:
-Name: {target_feature_name}
+**TARGET FEATURE** (from JLR):
+Name: {target_feature_name}{featureid_context}
 
 **CANDIDATES TO EVALUATE**:
 {candidates_text}
 
-**STRICT EVALUATION PROCESS**:
-Step 1: Identify target's subsystem (Powertrain, Braking, Safety, Infotainment, ADAS, Chassis, Body, Electrical, etc.)
-Step 2: For EACH candidate:
-   a) Does candidate belong to SAME subsystem? If NO → Score 0-20
-   b) Does candidate serve SAME functional purpose? If NO → Score 0-30
-   c) Are specifications compatible? If NO → Score 0-40
-   d) Only if YES to all: Consider 70+ score
-Step 3: Apply conservative scoring
+---
 
-**NEGATIVE EXAMPLES** (What NOT to match - Score 0-10):
-- "Pedestrian Airbags" ≠ "Dashcam/Universal Traffic Recorder" (Safety/Airbag ≠ Recording/Camera, Protection ≠ Documentation)
-- "Brake Rotors" ≠ "Netztrennwan/Network Separation Wall" (Braking ≠ Electrical, different subsystems)
-- "Engine Capacity" ≠ "Torque" (Capacity ≠ Force, different measurements)
-- "Airbags" ≠ "Seat Belts" (Both safety, but different components: Airbag ≠ Belt)
-- "Airbags" ≠ "Camera" (Protection device ≠ Recording device, fundamentally different)
-- "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions: Navigation ≠ Sensing)
-- "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components: Seat ≠ Wheel)
+## EVALUATION PROCESS
 
-**POSITIVE CROSS-LANGUAGE EXAMPLES** (Score 95-100):
-- "Motor" (German) = "Engine" (English) → Same component, same subsystem ✓
-- "Bremsscheiben" (German) = "Brake Rotors" (English) → Same component, same subsystem ✓
-- "Hubraum" (German) = "Engine Displacement" (English) → Same measurement, same subsystem ✓
+### STEP 1: IDENTIFY FEATURE GROUPS
 
-**COMMON CONFUSIONS TO AVOID** (These are NOT matches despite seeming related):
-1. Protection vs Recording:
-   - Airbags (active protection, deploys in accident) ≠ Dashcam (passive recording, documents accidents)
-   - Just because both relate to "accidents" doesn't make them equivalent!
-2. Active vs Passive Safety:
-   - Active safety (prevents accidents): Brakes, ADAS, Collision Warning
-   - Passive safety (protects in accidents): Airbags, Seat Belts, Crumple Zones
-   - Recording devices: Dashcams, Event Recorders (document only, don't protect)
-3. Component Type Confusion:
-   - Camera ≠ Airbag (Recording ≠ Protection, Sensor ≠ Physical safety device)
-   - Sensor ≠ Actuator (Detects ≠ Acts)
-   - Display ≠ Control (Shows ≠ Controls)
-4. "Traffic Safety" is NOT equivalence:
-   - Just because two features relate to "traffic safety" doesn't mean they match
-   - Example: Pedestrian Airbags and Dashcams both relate to traffic, but are completely different components
+**For TARGET**: Determine which JLR feature group it belongs to from this taxonomy:
 
-**SUBSYSTEM TAXONOMY** (Features must match subsystem - with multilingual examples):
-- Powertrain: Engine/Motor, Transmission/Getriebe, Drivetrain, Fuel System, Displacement/Hubraum
-- Braking: Rotors/Bremsscheiben, Pads/Bremsbeläge, Calipers, ABS, Brake Assist
-- Safety (Passive Protection): Airbags (Front, Side, Pedestrian, Curtain), Seat Belts/Sicherheitsgurte, Crumple Zones, Headrests
-- Safety (Active Prevention): Collision Warning, Emergency Brake, Lane Keeping, Blind Spot Detection
-- Recording/Documentation: Dashcam, Event Recorder, Traffic Recorder, Drive Recorder (NOT safety devices, only document)
-- Infotainment: Display, Audio, Navigation, Connectivity, Media System
-- ADAS: Cameras (for assistance, not recording), Sensors, Autopilot, Lane Assist, Parking Assist
-- Chassis: Suspension, Wheels/Räder, Tires/Reifen, Steering/Lenkung
-- Electrical: Battery/Batterie, Charging, Wiring, Fuses, Network Components/Netztrennwan
-- Body: Doors/Türen, Windows/Fenster, Roof/Dach, Paint/Lackierung, Trim
+**POWERTRAIN:**
+- POWERTRAIN - BRAKES (brake components, brake systems)
+- POWERTRAIN - DRIVING DYNAMICS (suspension, differentials, terrain systems)
+- POWERTRAIN - ENGINES (engine features, BEV acoustic systems)
+- POWERTRAIN - FUEL AND EXHAUST SYSTEMS (charging, exhaust)
+- POWERTRAIN - TRANSMISSION (gearbox, drivetrain)
 
-**SCORING GUIDE** (VERY Conservative):
-- 95-100: IDENTICAL features (exact same component, just different wording)
-- 85-94: TRUE functional equivalents (same subsystem, same function, compatible specs)
-- 70-84: Related features within same subsystem (e.g., "ABS" and "Brake Assist")
-- 40-69: Same subsystem but different components/functions
-- 20-39: Different subsystems but vague similarity
-- 0-19: Completely unrelated or different subsystems
+**EXTERIOR:**
+- EXTERIOR TRIM - ROOFS (panoramic, sunroof, convertible)
+- EXTERIOR TRIM - ORNAMENTATION (handles, window surrounds)
+- EXTERIOR TRIM - BODY STYLING (mirror caps, styling packs)
+- EXTERIOR FEATURES - GLASS AND MIRRORS (heated glass, mirror functions)
+- EXTERIOR FEATURES - TOWING EQUIPMENT (tow bars, trailer assist)
+- EXTERIOR FEATURES - LIGHTS (headlights, DRL, adaptive lighting)
+- EXTERIOR FEATURES - TAILGATE / BOOT (powered tailgate, load floor)
+- EXTERIOR FEATURES - ADDITIONAL FEATURES (side steps, power socket)
 
-**VERIFICATION CHECKLIST** (Must pass ALL for 85+ score):
-✓ Same component type? (Airbag = Airbag, Camera = Camera, Engine = Engine)
-✓ Same subsystem? (Safety ≠ Recording, Braking ≠ Electrical)
-✓ Same functional purpose? (Protection ≠ Documentation, Recording ≠ Prevention)
-✓ Same measurement type (if applicable)? (Capacity ≠ Force, Volume ≠ Power)
-✓ Compatible specifications?
-✓ Clear technical equivalence (not just semantic similarity)?
-✓ NOT just "related to traffic/accidents"?
+**WHEELS:**
+- WHEELS AND TYRES - TYRES (tyre types and performance)
+- WHEELS AND TYRES - SPARE WHEELS (spare wheel options)
+- WHEELS AND TYRES - WHEELS (wheel sizes and finishes)
 
-**CRITICAL RULES**:
-- Most candidates will score 0-50 (this is NORMAL and EXPECTED)
-- Scores 90+ should be RARE (only true equivalents)
-- Different component types = automatic score <10 (Airbag ≠ Camera, ALWAYS!)
-- Different subsystems = automatic score <20 (Safety ≠ Recording, Protection ≠ Documentation)
-- "Related to traffic/accidents" is NOT equivalence (Airbags and Dashcams both relate to accidents, but score 0-10)
-- When uncertain about equivalence, score 30-50 (not 70-80)
-- Precision is CRITICAL - false positives are worse than false negatives
-- ASK YOURSELF: "Are these the SAME type of component?" If NO → Score <20
-- Evaluate EACH candidate independently
+**INTERIOR:**
+- SEATING - MATERIALS (leather types, fabric grades)
+- SEATING - FUNCTIONALITY (seat adjustments, memory, folding)
+- SEATING - CONVENIENCE (heating, cooling, cup holders)
+- SEATING - STYLES (sports seats)
+- EXTENDED INTERIOR - MATERIALS (dashboard, console materials)
+- INTERIOR TRIM - MATERIALS (veneers, finishers)
+- INTERIOR TRIM - CARPET MATS (mat types and quality)
+- INTERIOR TRIM - STEERING WHEELS (wheel materials, adjustment, heating)
+- INTERIOR TRIM - TREADPLATES (treadplate types and lighting)
+- INTERIOR TRIM - HEADLINING (headlining materials)
+- INTERIOR FEATURES - ADDITIONAL FEATURES (mirrors, sunblinds, storage covers)
+- INTERIOR FEATURES - LIGHTING (ambient lighting systems)
+- INTERIOR FEATURES - STORAGE (cooler/refrigerator compartments)
+- INTERIOR FEATURES - CLIMATE CONTROL (zone control, air quality)
+
+**INFOTAINMENT:**
+- INFOTAINMENT - AUDIO SYSTEMS (speakers, audio quality levels)
+- INFOTAINMENT - INSTRUMENT CLUSTER (displays, dials, HUD)
+- INFOTAINMENT - ENTERTAINMENT (screens, rear entertainment)
+- INFOTAINMENT - INCONTROL SYSTEMS (connectivity, navigation, apps)
+- INFOTAINMENT - MULTIMEDIA (charging, ports, streaming)
+
+**SAFETY:**
+- SAFETY AND SECURITY - MISCELLANEOUS (TPMS, alarms, keyless entry)
+- SAFETY AND SECURITY - ADAS (cameras, parking, lane assist, cruise control, dashcam)
+- SAFETY AND SECURITY - EMERGENCY EQUIPMENT (pedestrian airbags, knee airbags)
+
+**OTHER:**
+- PAINTS - TYPES (paint finishes)
+- DERIVATIVE - WHEELBASE (wheelbase variants)
+- SPECIFICATIONS - TECHNICAL (engine specs, dimensions, performance)
+- SPECIFICATIONS - PRICE (pricing data)
+
+**For EACH CANDIDATE**: Classify into the same taxonomy based on its technical function.
+
+---
+
+### STEP 2: TRANSLATION & COMPONENT IDENTIFICATION
+
+If candidate feature contains German terms, translate to English:
+- "Bremsscheiben" → "Brake Discs"
+- "Getriebe" → "Transmission"
+- "Motor" → "Engine"
+- "Airbag" → "Airbag"
+- "Kamera" → "Camera"
+
+Identify the **specific component or specification** being described:
+- Physical component (e.g., airbag, camera, brake disc, seat)
+- System (e.g., navigation, climate control)
+- Specification (e.g., power output, screen size)
+- Material (e.g., leather type, paint finish)
+
+---
+
+### STEP 3: APPLY MATCHING RULES (FOR EACH CANDIDATE)
+
+**RULE 1 - Feature Group Match (MANDATORY for 70+ score)**
+Target and candidate MUST be in the same specific feature group.
+- ✓ Both in "POWERTRAIN - BRAKES"
+- ✗ One in "SAFETY - ADAS", other in "SAFETY - EMERGENCY EQUIPMENT"
+- ✗ One in "POWERTRAIN - BRAKES", other in "POWERTRAIN - TRANSMISSION"
+
+**RULE 2 - Component Type Match (MANDATORY for 85+ score)**
+Both must describe the same type of component.
+- ✓ Both are brake discs
+- ✓ Both are cameras (same component type)
+- ✗ One is airbag, other is camera (different physical components)
+- ✗ One is dashcam, other is airbag (recording device ≠ protection device)
+
+**RULE 3 - Function Match (MANDATORY for 85+ score)**
+Both must serve the same primary function.
+- ✓ Both provide driver assistance (lane keeping)
+- ✗ One protects in crash (airbag), other records events (dashcam)
+- ✗ One displays information, other controls systems
+
+**RULE 4 - Specification Compatibility (for 90+ score)**
+If numeric values exist, they must be comparable.
+- ✓ "20 inch wheels" matches "20 Zoll Räder"
+- ✗ "20 inch wheels" vs "22 inch wheels" (different specs)
+- ✗ "Engine capacity" vs "Torque" (different measurement types)
+
+---
+
+### STEP 4: SCORING DECISION (FOR EACH CANDIDATE)
+
+**Score 95-100**: Perfect match
+- Identical component in same feature group
+- Only OEM naming/language differs
+- Specifications identical or highly compatible
+- Example: "Pedestrian Airbags" = "Fußgänger-Airbags"
+
+**Score 85-94**: Strong functional match
+- Same component type in same feature group
+- Same function and purpose
+- Specifications compatible (minor differences acceptable)
+- Example: "LED Headlights" = "LED-Scheinwerfer"
+
+**Score 70-84**: Related within same group
+- Same feature group but different variants
+- Example: "Front Airbags" vs "Side Airbags" (both in EMERGENCY EQUIPMENT)
+
+**Score 40-69**: Same high-level category, different groups
+- Example: Both under SAFETY but one in ADAS, other in EMERGENCY EQUIPMENT
+
+**Score 20-39**: Weak semantic connection only
+- Different feature groups
+- No clear technical equivalence
+
+**Score 0-19**: No meaningful relationship
+- Different categories entirely
+- No functional similarity
+
+---
+
+## AUTOMATIC DISQUALIFIERS (Score ≤20)
+
+Apply these rejection criteria - if ANY apply, score must be 20 or below:
+
+❌ **Different Feature Groups**: "SAFETY - ADAS" ≠ "SAFETY - EMERGENCY EQUIPMENT"
+❌ **Different Component Types**: Airbag ≠ Camera, Sensor ≠ Display, Engine ≠ Transmission
+❌ **Different Functions**: Protection ≠ Recording, Display ≠ Control, Sensing ≠ Actuation
+❌ **Different Measurement Types**: Volume ≠ Force, Pressure ≠ Temperature, Capacity ≠ Torque
+❌ **Cross-Category Matching**: POWERTRAIN ≠ INFOTAINMENT, SEATING ≠ LIGHTING
+
+---
+
+## CRITICAL DECISION PRINCIPLES
+
+1. **Hierarchical Matching**: Features must match at the SPECIFIC feature group level (e.g., "POWERTRAIN - BRAKES"), not just the high-level category (e.g., "POWERTRAIN")
+
+2. **Component Identity**: A camera is never an airbag. A brake disc is never a brake pad. A navigation system is never a parking sensor. Focus on what the component IS, not what it relates to.
+
+3. **Function Over Category**: "Traffic safety" is not equivalence. Dashcams and airbags both relate to traffic/accidents but serve completely different functions (recording vs. protection).
+
+4. **Language Neutrality**: German/English terminology does not affect scoring if they describe the same component.
+
+5. **OEM Variation Awareness**: Different OEMs use different names ("Pedestrian Protection System" vs "Pedestrian Airbags"), but focus on the underlying component.
+
+6. **Conservative Scoring**: When uncertain about feature group classification or component equivalence, score LOW (0-40). Better to miss a match than create a false positive.
+
+7. **Specification Precision**: "20 inch wheels" ≠ "22 inch wheels" even though both are wheels in the same group.
+
+---
+
+## OUTPUT FORMAT
 
 Evaluate ALL {len(candidates)} candidates and provide your response as a JSON object with this exact structure:
+```json
 {{
   "evaluations": [
     {{
       "context_matching_score": <integer 0-100>,
-      "reasoning": "<reasoning for candidate 1 - be concise, 2-3 sentences max>",
-      "key_factors": ["factor1", "factor2", ...] // 1-5 factors
+      "reasoning": "<Translate German terms. State both feature groups. Explain match/mismatch based on component type and function>",
+      "key_factors": ["factor1", "factor2", "factor3"]
     }},
     {{
       "context_matching_score": <integer 0-100>,
-      "reasoning": "<reasoning for candidate 2 - be concise, 2-3 sentences max>",
-      "key_factors": ["factor1", "factor2", ...] // 1-5 factors
+      "reasoning": "<Translate German terms. State both feature groups. Explain match/mismatch based on component type and function>",
+      "key_factors": ["factor1", "factor2", "factor3"]
     }}
     // ... one evaluation object per candidate
   ]
 }}
+```
 
-CRITICAL:
+**Reasoning Requirements (for each candidate)**:
+- Maximum 3 sentences
+- Include German→English translations if applicable
+- State both feature groups clearly
+- Explain the critical factor determining the score
+- Focus on WHY they match or don't match, not just describing them
+
+**CRITICAL**:
 - Return evaluations in the SAME ORDER as the candidates (Candidate 1, 2, 3, etc.)
-- Keep each reasoning concise (2-3 sentences max, under 500 characters)
-- Provide 1-5 key_factors per candidate
-Provide ONLY the JSON object, no additional text or formatting.
+- Evaluate EACH candidate independently
+- Provide ONLY the JSON object, no additional text or formatting
 """
         return prompt
 
