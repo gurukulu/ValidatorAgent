@@ -63,6 +63,12 @@ class MappedCandidate(BaseModel):
         le=100,
         description="LLM-assigned semantic matching score (0-100)"
     )
+    confidence: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Normalized confidence score (0-1) with 2 decimal places"
+    )
     match_quality: MatchQuality = Field(
         default=MatchQuality.NOT_EVALUATED,
         description="Quality classification"
