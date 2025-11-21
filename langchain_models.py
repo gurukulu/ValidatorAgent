@@ -23,11 +23,13 @@ class BiasFreeCandidateInput(BaseModel):
     - feature_value
     - notes (semantic context)
     - oem (extracted from car_model)
+    - sourcetext_featureid_context (extracted keyword/feature context)
     """
     feature_name: str = Field(..., description="Name of the candidate feature")
     feature_value: str = Field(..., description="Description or value of the feature")
     notes: str = Field(default="", description="Additional semantic notes or context")
     oem: str = Field(default="", description="OEM/manufacturer extracted from car model")
+    sourcetext_featureid_context: str = Field(default="", description="Extracted context from sourcetext_featureid")
 
 
 class CandidateEvaluation(BaseModel):
