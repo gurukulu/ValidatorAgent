@@ -105,6 +105,7 @@ class BedrockFeatureMapper:
     DEFAULT_EVALUATE_ALL = True  # Evaluate ALL candidates below threshold
     DEFAULT_SKIP_GOOD_FEATURES = False  # Skip features with good similarity matches
     DEFAULT_MAX_WORKERS = 1  # Number of parallel threads (1 = sequential)
+    DEFAULT_MIN_LLM_THRESHOLD = 0.5  # Minimum similarity to warrant LLM evaluation
     COST_PER_EVALUATION = 0.0003  # Estimated cost in USD (single call)
     COST_PER_BATCH_CALL = 0.0008  # Estimated cost for batch call (amortized)
 
@@ -119,6 +120,7 @@ class BedrockFeatureMapper:
         evaluate_all: bool = DEFAULT_EVALUATE_ALL,
         skip_features_with_good_matches: bool = DEFAULT_SKIP_GOOD_FEATURES,
         max_workers: int = DEFAULT_MAX_WORKERS,
+        min_llm_threshold: float = DEFAULT_MIN_LLM_THRESHOLD,
         quality_thresholds: Optional[QualityThresholds] = None,
         log_level: int = logging.INFO,
     ):
@@ -135,6 +137,7 @@ class BedrockFeatureMapper:
             evaluate_all: Evaluate ALL candidates below threshold, ignore max limit (default: True)
             skip_features_with_good_matches: Skip features where highest similarity >= threshold (default: False)
             max_workers: Number of parallel threads for processing features (default: 1 = sequential)
+            min_llm_threshold: Minimum similarity score to warrant LLM evaluation (default: 0.5)
             quality_thresholds: Custom quality thresholds
             log_level: Logging level
         """
@@ -149,6 +152,7 @@ class BedrockFeatureMapper:
         self.evaluate_all = evaluate_all
         self.skip_features_with_good_matches = skip_features_with_good_matches
         self.max_workers = max_workers
+        self.min_llm_threshold = min_llm_threshold
         self.quality_thresholds = quality_thresholds or QualityThresholds()
 
         # Thread-safe statistics (for parallel processing)
@@ -160,6 +164,7 @@ class BedrockFeatureMapper:
             "total_candidates": 0,
             "candidates_evaluated": 0,
             "candidates_auto_accepted": 0,
+            "candidates_rejected_low_similarity": 0,  # Rejected due to low similarity
             "features_skipped": 0,  # Features skipped due to good matches
             "llm_calls": 0,
             "batch_llm_calls": 0,
@@ -174,8 +179,9 @@ class BedrockFeatureMapper:
         self.logger.info(f"📍 AWS Region: {self.aws_region}")
         self.logger.info(f"🤖 Model: {self.model_id}")
         self.logger.info(f"📊 Similarity Threshold: {self.similarity_threshold}")
+        self.logger.info(f"🔽 Min LLM Threshold: {self.min_llm_threshold} (candidates below this are auto-rejected)")
         if self.evaluate_all:
-            self.logger.info(f"🎯 Candidate Evaluation: ALL candidates below threshold")
+            self.logger.info(f"🎯 Candidate Evaluation: ALL candidates in range [{self.min_llm_threshold}, {self.similarity_threshold})")
         else:
             self.logger.info(f"🎯 Max Candidates to Evaluate: {self.max_candidates_to_evaluate}")
         self.logger.info(f"📦 Batch Evaluation: {'Enabled' if self.use_batch_evaluation else 'Disabled'} "
@@ -915,7 +921,7 @@ Provide ONLY the JSON object, no additional text or formatting.
 
         self.logger.info(f"📊 Total candidates: {len(feature.mapped_list)}")
         self.logger.info(f"✅ Above threshold (≥{self.similarity_threshold}): {len(above_threshold)} → Auto-accept")
-        self.logger.info(f"🔍 Below threshold (<{self.similarity_threshold}): {len(below_threshold)} → LLM evaluation")
+        self.logger.info(f"🔍 Below threshold (<{self.similarity_threshold}): {len(below_threshold)} → Check min threshold")
 
         # Process above-threshold candidates (auto-accept)
         for candidate in above_threshold:
@@ -929,16 +935,45 @@ Provide ONLY the JSON object, no additional text or formatting.
             with self.stats_lock:
                 self.stats["candidates_auto_accepted"] += len(above_threshold)
 
-        # Process below-threshold candidates (LLM evaluation)
+        # Split below-threshold candidates: LLM-worthy vs too low
+        candidates_for_llm = []
+        candidates_rejected = []
+
+        for candidate in below_threshold:
+            if candidate.similarity_score >= self.min_llm_threshold:
+                candidates_for_llm.append(candidate)
+            else:
+                candidates_rejected.append(candidate)
+
+        # Process rejected candidates (too low for LLM evaluation)
+        if candidates_rejected:
+            self.logger.info(
+                f"❌ Rejecting {len(candidates_rejected)} candidates (similarity < {self.min_llm_threshold}) "
+                f"→ Auto-reject without LLM"
+            )
+            for candidate in candidates_rejected:
+                candidate.evaluated = False
+                candidate.match_quality = MatchQuality.POOR
+                candidate.confidence = self._calculate_confidence(candidate)
+                candidate.llm_reasoning = (
+                    f"Auto-rejected: similarity ({candidate.similarity_score:.3f}) "
+                    f"below minimum LLM threshold ({self.min_llm_threshold})"
+                )
+
+            # Track rejected candidates (thread-safe)
+            with self.stats_lock:
+                self.stats["candidates_rejected_low_similarity"] += len(candidates_rejected)
+
+        # Process candidates worthy of LLM evaluation
         if self.evaluate_all:
-            candidates_to_evaluate = below_threshold
-            if len(below_threshold) > self.max_candidates_to_evaluate:
-                self.logger.info(f"🎯 Evaluating ALL {len(candidates_to_evaluate)} candidates below threshold")
+            candidates_to_evaluate = candidates_for_llm
+            if len(candidates_for_llm) > 0:
+                self.logger.info(f"🎯 Evaluating ALL {len(candidates_to_evaluate)} candidates with LLM")
         else:
-            candidates_to_evaluate = below_threshold[:self.max_candidates_to_evaluate]
-            if len(below_threshold) > self.max_candidates_to_evaluate:
+            candidates_to_evaluate = candidates_for_llm[:self.max_candidates_to_evaluate]
+            if len(candidates_for_llm) > self.max_candidates_to_evaluate:
                 self.logger.info(
-                    f"⚠️ {len(below_threshold)} candidates below threshold, "
+                    f"⚠️ {len(candidates_for_llm)} candidates for LLM, "
                     f"limiting to {self.max_candidates_to_evaluate}"
                 )
 
@@ -1252,6 +1287,8 @@ Provide ONLY the JSON object, no additional text or formatting.
         self.logger.info(f"📦 Total Candidates: {summary.total_candidates}")
         self.logger.info(f"🤖 Candidates Evaluated by LLM: {summary.candidates_evaluated}")
         self.logger.info(f"⚡ Candidates Auto-Accepted: {summary.candidates_auto_accepted}")
+        if self.stats["candidates_rejected_low_similarity"] > 0:
+            self.logger.info(f"❌ Candidates Auto-Rejected (low similarity < {self.min_llm_threshold}): {self.stats['candidates_rejected_low_similarity']}")
         if self.stats["features_skipped"] > 0:
             self.logger.info(f"⏭️  Features Skipped (good matches): {self.stats['features_skipped']}")
         self.logger.info("")
@@ -1279,6 +1316,11 @@ Provide ONLY the JSON object, no additional text or formatting.
             if savings > 0:
                 self.logger.info(f"💡 Batch Savings: ${savings:.4f} USD ({savings_pct:.1f}% reduction)")
 
+        # Calculate savings from min threshold rejection
+        if self.stats["candidates_rejected_low_similarity"] > 0:
+            rejected_savings = self.stats["candidates_rejected_low_similarity"] * self.COST_PER_EVALUATION
+            self.logger.info(f"💡 Min Threshold Savings: ${rejected_savings:.4f} USD ({self.stats['candidates_rejected_low_similarity']} candidates not evaluated)")
+
         if self.stats["llm_errors"] > 0:
             self.logger.warning(f"⚠️  LLM Errors: {self.stats['llm_errors']}")
         self.logger.info("=" * 80)
@@ -1305,6 +1347,9 @@ Examples:
 
   # Custom threshold
   python enhanced_mapper_langchain.py input.json --threshold 0.80
+
+  # Set minimum LLM threshold (auto-reject candidates below 0.5 similarity)
+  python enhanced_mapper_langchain.py input.json --min-llm-threshold 0.5
 
   # Skip features with good matches (only process features with all candidates below threshold)
   python enhanced_mapper_langchain.py input.json --skip-features-with-good-matches
@@ -1377,6 +1422,12 @@ Examples:
         help="Number of parallel threads for processing features (default: 1 = sequential, recommended: 5-10 for speedup)"
     )
     parser.add_argument(
+        "--min-llm-threshold",
+        type=float,
+        default=0.5,
+        help="Minimum similarity score to warrant LLM evaluation (default: 0.5, candidates below this are auto-rejected)"
+    )
+    parser.add_argument(
         "--region",
         type=str,
         default="eu-central-1",
@@ -1425,6 +1476,7 @@ Examples:
             evaluate_all=not args.no_evaluate_all,
             skip_features_with_good_matches=args.skip_features_with_good_matches,
             max_workers=args.max_workers,
+            min_llm_threshold=args.min_llm_threshold,
             log_level=log_level,
         )
 
