@@ -21,8 +21,10 @@ import logging
 import sys
 import time
 import re
+import threading
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 from pydantic import ValidationError
@@ -102,6 +104,8 @@ class BedrockFeatureMapper:
     DEFAULT_BATCH_SIZE = 10  # Max candidates per batch LLM call
     DEFAULT_EVALUATE_ALL = True  # Evaluate ALL candidates below threshold
     DEFAULT_SKIP_GOOD_FEATURES = False  # Skip features with good similarity matches
+    DEFAULT_MAX_WORKERS = 1  # Number of parallel threads (1 = sequential)
+    DEFAULT_MIN_LLM_THRESHOLD = 0.5  # Minimum similarity to warrant LLM evaluation
     COST_PER_EVALUATION = 0.0003  # Estimated cost in USD (single call)
     COST_PER_BATCH_CALL = 0.0008  # Estimated cost for batch call (amortized)
 
@@ -115,6 +119,8 @@ class BedrockFeatureMapper:
         use_batch_evaluation: bool = True,
         evaluate_all: bool = DEFAULT_EVALUATE_ALL,
         skip_features_with_good_matches: bool = DEFAULT_SKIP_GOOD_FEATURES,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        min_llm_threshold: float = DEFAULT_MIN_LLM_THRESHOLD,
         quality_thresholds: Optional[QualityThresholds] = None,
         log_level: int = logging.INFO,
     ):
@@ -130,6 +136,8 @@ class BedrockFeatureMapper:
             use_batch_evaluation: Enable batch evaluation to save tokens (default: True)
             evaluate_all: Evaluate ALL candidates below threshold, ignore max limit (default: True)
             skip_features_with_good_matches: Skip features where highest similarity >= threshold (default: False)
+            max_workers: Number of parallel threads for processing features (default: 1 = sequential)
+            min_llm_threshold: Minimum similarity score to warrant LLM evaluation (default: 0.5)
             quality_thresholds: Custom quality thresholds
             log_level: Logging level
         """
@@ -143,7 +151,12 @@ class BedrockFeatureMapper:
         self.use_batch_evaluation = use_batch_evaluation
         self.evaluate_all = evaluate_all
         self.skip_features_with_good_matches = skip_features_with_good_matches
+        self.max_workers = max_workers
+        self.min_llm_threshold = min_llm_threshold
         self.quality_thresholds = quality_thresholds or QualityThresholds()
+
+        # Thread-safe statistics (for parallel processing)
+        self.stats_lock = threading.Lock()
 
         # Statistics
         self.stats = {
@@ -151,6 +164,7 @@ class BedrockFeatureMapper:
             "total_candidates": 0,
             "candidates_evaluated": 0,
             "candidates_auto_accepted": 0,
+            "candidates_rejected_low_similarity": 0,  # Rejected due to low similarity
             "features_skipped": 0,  # Features skipped due to good matches
             "llm_calls": 0,
             "batch_llm_calls": 0,
@@ -165,13 +179,18 @@ class BedrockFeatureMapper:
         self.logger.info(f"📍 AWS Region: {self.aws_region}")
         self.logger.info(f"🤖 Model: {self.model_id}")
         self.logger.info(f"📊 Similarity Threshold: {self.similarity_threshold}")
+        self.logger.info(f"🔽 Min LLM Threshold: {self.min_llm_threshold} (candidates below this are auto-rejected)")
         if self.evaluate_all:
-            self.logger.info(f"🎯 Candidate Evaluation: ALL candidates below threshold")
+            self.logger.info(f"🎯 Candidate Evaluation: ALL candidates in range [{self.min_llm_threshold}, {self.similarity_threshold})")
         else:
             self.logger.info(f"🎯 Max Candidates to Evaluate: {self.max_candidates_to_evaluate}")
         self.logger.info(f"📦 Batch Evaluation: {'Enabled' if self.use_batch_evaluation else 'Disabled'} "
                         f"(batch size: {self.batch_size})")
         self.logger.info(f"⏭️  Skip Features with Good Matches: {'Enabled' if self.skip_features_with_good_matches else 'Disabled'}")
+        if self.max_workers > 1:
+            self.logger.info(f"⚡ Parallel Processing: Enabled ({self.max_workers} workers)")
+        else:
+            self.logger.info(f"⚡ Parallel Processing: Disabled (sequential)")
         self.logger.info(f"✨ Quality Thresholds: Auto-accept={self.quality_thresholds.auto_accept}, "
                         f"Review={self.quality_thresholds.manual_review}, "
                         f"Reject={self.quality_thresholds.reject}")
@@ -565,7 +584,9 @@ Provide ONLY the JSON object, no additional text or formatting.
                 # Validate with Pydantic
                 evaluation = CandidateEvaluation(**response_data)
 
-                self.stats["llm_calls"] += 1
+                # Track stats (thread-safe)
+                with self.stats_lock:
+                    self.stats["llm_calls"] += 1
 
                 self.logger.debug(f"✅ LLM returned score: {evaluation.context_matching_score}")
                 return evaluation
@@ -573,14 +594,16 @@ Provide ONLY the JSON object, no additional text or formatting.
             except ValidationError as e:
                 self.logger.warning(f"⚠️ Validation error on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
-                    self.stats["llm_errors"] += 1
+                    with self.stats_lock:
+                        self.stats["llm_errors"] += 1
                     raise
                 time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
 
             except Exception as e:
                 self.logger.error(f"❌ LLM error on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
-                    self.stats["llm_errors"] += 1
+                    with self.stats_lock:
+                        self.stats["llm_errors"] += 1
                     raise
                 time.sleep(2 ** attempt)
 
@@ -650,8 +673,10 @@ Provide ONLY the JSON object, no additional text or formatting.
                         f"got {len(batch_result.evaluations)}"
                     )
 
-                self.stats["batch_llm_calls"] += 1
-                self.stats["llm_calls"] += 1
+                # Track stats (thread-safe)
+                with self.stats_lock:
+                    self.stats["batch_llm_calls"] += 1
+                    self.stats["llm_calls"] += 1
 
                 self.logger.debug(
                     f"✅ Batch LLM returned {len(batch_result.evaluations)} evaluations"
@@ -663,7 +688,8 @@ Provide ONLY the JSON object, no additional text or formatting.
                     f"⚠️ Batch validation error on attempt {attempt + 1}: {e}"
                 )
                 if attempt == max_retries - 1:
-                    self.stats["llm_errors"] += 1
+                    with self.stats_lock:
+                        self.stats["llm_errors"] += 1
                     raise
                 time.sleep(2 ** attempt)  # Exponential backoff
 
@@ -672,7 +698,8 @@ Provide ONLY the JSON object, no additional text or formatting.
                     f"❌ Batch LLM error on attempt {attempt + 1}: {e}"
                 )
                 if attempt == max_retries - 1:
-                    self.stats["llm_errors"] += 1
+                    with self.stats_lock:
+                        self.stats["llm_errors"] += 1
                     raise
                 time.sleep(2 ** attempt)
 
@@ -800,8 +827,10 @@ Provide ONLY the JSON object, no additional text or formatting.
                 candidate.evaluated = True
                 candidate.llm_reasoning = evaluation.reasoning
 
-                self.stats["candidates_evaluated"] += 1
-                self.stats["individual_llm_calls"] += 1
+                # Track stats (thread-safe)
+                with self.stats_lock:
+                    self.stats["candidates_evaluated"] += 1
+                    self.stats["individual_llm_calls"] += 1
 
                 # Log result
                 quality_emoji = {
@@ -847,8 +876,9 @@ Provide ONLY the JSON object, no additional text or formatting.
         self.logger.info(f"🎯 Processing Feature: {feature.Feature_Name}")
         self.logger.info("=" * 80)
 
-        self.stats["total_features"] += 1
-        self.stats["total_candidates"] += len(feature.mapped_list)
+        with self.stats_lock:
+            self.stats["total_features"] += 1
+            self.stats["total_candidates"] += len(feature.mapped_list)
 
         if not feature.mapped_list:
             self.logger.warning("⚠️ No candidates found for this feature")
@@ -869,10 +899,11 @@ Provide ONLY the JSON object, no additional text or formatting.
                     candidate.llm_reasoning = (
                         f"Feature skipped - highest similarity ({max_similarity:.3f}) >= threshold"
                     )
-                    self.stats["candidates_auto_accepted"] += 1
 
-                # Track that we skipped this feature
-                self.stats["features_skipped"] += 1
+                # Track stats (thread-safe)
+                with self.stats_lock:
+                    self.stats["candidates_auto_accepted"] += len(feature.mapped_list)
+                    self.stats["features_skipped"] += 1
 
                 # Select best match and return
                 self._select_best_match(feature)
@@ -890,7 +921,7 @@ Provide ONLY the JSON object, no additional text or formatting.
 
         self.logger.info(f"📊 Total candidates: {len(feature.mapped_list)}")
         self.logger.info(f"✅ Above threshold (≥{self.similarity_threshold}): {len(above_threshold)} → Auto-accept")
-        self.logger.info(f"🔍 Below threshold (<{self.similarity_threshold}): {len(below_threshold)} → LLM evaluation")
+        self.logger.info(f"🔍 Below threshold (<{self.similarity_threshold}): {len(below_threshold)} → Check min threshold")
 
         # Process above-threshold candidates (auto-accept)
         for candidate in above_threshold:
@@ -898,18 +929,51 @@ Provide ONLY the JSON object, no additional text or formatting.
             candidate.match_quality = MatchQuality.NOT_EVALUATED
             candidate.confidence = self._calculate_confidence(candidate)
             candidate.llm_reasoning = f"High similarity ({candidate.similarity_score:.3f}) - auto-accepted without LLM evaluation"
-            self.stats["candidates_auto_accepted"] += 1
 
-        # Process below-threshold candidates (LLM evaluation)
+        # Track auto-accepted candidates (thread-safe)
+        if above_threshold:
+            with self.stats_lock:
+                self.stats["candidates_auto_accepted"] += len(above_threshold)
+
+        # Split below-threshold candidates: LLM-worthy vs too low
+        candidates_for_llm = []
+        candidates_rejected = []
+
+        for candidate in below_threshold:
+            if candidate.similarity_score >= self.min_llm_threshold:
+                candidates_for_llm.append(candidate)
+            else:
+                candidates_rejected.append(candidate)
+
+        # Process rejected candidates (too low for LLM evaluation)
+        if candidates_rejected:
+            self.logger.info(
+                f"❌ Rejecting {len(candidates_rejected)} candidates (similarity < {self.min_llm_threshold}) "
+                f"→ Auto-reject without LLM"
+            )
+            for candidate in candidates_rejected:
+                candidate.evaluated = False
+                candidate.match_quality = MatchQuality.POOR
+                candidate.confidence = self._calculate_confidence(candidate)
+                candidate.llm_reasoning = (
+                    f"Auto-rejected: similarity ({candidate.similarity_score:.3f}) "
+                    f"below minimum LLM threshold ({self.min_llm_threshold})"
+                )
+
+            # Track rejected candidates (thread-safe)
+            with self.stats_lock:
+                self.stats["candidates_rejected_low_similarity"] += len(candidates_rejected)
+
+        # Process candidates worthy of LLM evaluation
         if self.evaluate_all:
-            candidates_to_evaluate = below_threshold
-            if len(below_threshold) > self.max_candidates_to_evaluate:
-                self.logger.info(f"🎯 Evaluating ALL {len(candidates_to_evaluate)} candidates below threshold")
+            candidates_to_evaluate = candidates_for_llm
+            if len(candidates_for_llm) > 0:
+                self.logger.info(f"🎯 Evaluating ALL {len(candidates_to_evaluate)} candidates with LLM")
         else:
-            candidates_to_evaluate = below_threshold[:self.max_candidates_to_evaluate]
-            if len(below_threshold) > self.max_candidates_to_evaluate:
+            candidates_to_evaluate = candidates_for_llm[:self.max_candidates_to_evaluate]
+            if len(candidates_for_llm) > self.max_candidates_to_evaluate:
                 self.logger.info(
-                    f"⚠️ {len(below_threshold)} candidates below threshold, "
+                    f"⚠️ {len(candidates_for_llm)} candidates for LLM, "
                     f"limiting to {self.max_candidates_to_evaluate}"
                 )
 
@@ -943,7 +1007,6 @@ Provide ONLY the JSON object, no additional text or formatting.
                         candidate.confidence = self._calculate_confidence(candidate)
                         candidate.evaluated = True
                         candidate.llm_reasoning = evaluation.reasoning
-                        self.stats["candidates_evaluated"] += 1
 
                         # Log result
                         quality_emoji = {
@@ -965,11 +1028,16 @@ Provide ONLY the JSON object, no additional text or formatting.
                             candidate.context_matching_score >= self.quality_thresholds.auto_accept):
                             self.logger.info(f"      🎯 Found semantic match despite low similarity!")
 
+                    # Track batch evaluation stats (thread-safe)
+                    with self.stats_lock:
+                        self.stats["candidates_evaluated"] += len(evaluations)
+
                 except Exception as e:
                     # Batch evaluation failed - fall back to individual evaluation
                     self.logger.warning(f"⚠️ Batch evaluation failed: {e}")
                     self.logger.info("🔄 Falling back to individual evaluation...")
-                    self.stats["batch_fallbacks"] += 1
+                    with self.stats_lock:
+                        self.stats["batch_fallbacks"] += 1
 
                     # Process individually as fallback
                     self._evaluate_candidates_individually(
@@ -1070,11 +1138,36 @@ Provide ONLY the JSON object, no additional text or formatting.
         # Convert to FeatureMapping objects
         features = [FeatureMapping(**f) for f in features_data]
 
-        # Process each feature
-        processed_features = []
-        for feature in features:
-            processed_feature = self._process_single_feature(feature)
-            processed_features.append(processed_feature)
+        # Process features (parallel or sequential based on max_workers)
+        if self.max_workers > 1:
+            # Parallel processing with ThreadPoolExecutor
+            self.logger.info(f"⚡ Processing {len(features)} features in parallel ({self.max_workers} workers)...")
+            processed_features = []
+
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Submit all features for processing
+                future_to_feature = {
+                    executor.submit(self._process_single_feature, feature): feature
+                    for feature in features
+                }
+
+                # Collect results as they complete
+                for future in as_completed(future_to_feature):
+                    feature = future_to_feature[future]
+                    try:
+                        processed_feature = future.result()
+                        processed_features.append(processed_feature)
+                    except Exception as e:
+                        self.logger.error(f"❌ Error processing feature {feature.Feature_Name}: {e}")
+                        # Add feature without processing
+                        processed_features.append(feature)
+        else:
+            # Sequential processing (original behavior)
+            self.logger.info(f"🔄 Processing {len(features)} features sequentially...")
+            processed_features = []
+            for feature in features:
+                processed_feature = self._process_single_feature(feature)
+                processed_features.append(processed_feature)
 
         # Build summary
         summary = self._build_summary(processed_features)
@@ -1194,6 +1287,8 @@ Provide ONLY the JSON object, no additional text or formatting.
         self.logger.info(f"📦 Total Candidates: {summary.total_candidates}")
         self.logger.info(f"🤖 Candidates Evaluated by LLM: {summary.candidates_evaluated}")
         self.logger.info(f"⚡ Candidates Auto-Accepted: {summary.candidates_auto_accepted}")
+        if self.stats["candidates_rejected_low_similarity"] > 0:
+            self.logger.info(f"❌ Candidates Auto-Rejected (low similarity < {self.min_llm_threshold}): {self.stats['candidates_rejected_low_similarity']}")
         if self.stats["features_skipped"] > 0:
             self.logger.info(f"⏭️  Features Skipped (good matches): {self.stats['features_skipped']}")
         self.logger.info("")
@@ -1221,6 +1316,11 @@ Provide ONLY the JSON object, no additional text or formatting.
             if savings > 0:
                 self.logger.info(f"💡 Batch Savings: ${savings:.4f} USD ({savings_pct:.1f}% reduction)")
 
+        # Calculate savings from min threshold rejection
+        if self.stats["candidates_rejected_low_similarity"] > 0:
+            rejected_savings = self.stats["candidates_rejected_low_similarity"] * self.COST_PER_EVALUATION
+            self.logger.info(f"💡 Min Threshold Savings: ${rejected_savings:.4f} USD ({self.stats['candidates_rejected_low_similarity']} candidates not evaluated)")
+
         if self.stats["llm_errors"] > 0:
             self.logger.warning(f"⚠️  LLM Errors: {self.stats['llm_errors']}")
         self.logger.info("=" * 80)
@@ -1242,8 +1342,14 @@ Examples:
   # Process with defaults (batch evaluation + evaluate all candidates below threshold)
   python enhanced_mapper_langchain.py input.json
 
+  # Parallel processing for 10x speedup (process 10 features at once)
+  python enhanced_mapper_langchain.py input.json --max-workers 10
+
   # Custom threshold
   python enhanced_mapper_langchain.py input.json --threshold 0.80
+
+  # Set minimum LLM threshold (auto-reject candidates below 0.5 similarity)
+  python enhanced_mapper_langchain.py input.json --min-llm-threshold 0.5
 
   # Skip features with good matches (only process features with all candidates below threshold)
   python enhanced_mapper_langchain.py input.json --skip-features-with-good-matches
@@ -1310,6 +1416,18 @@ Examples:
         help="Skip entire feature if highest similarity >= threshold (only process features with all candidates below threshold)"
     )
     parser.add_argument(
+        "--max-workers", "-w",
+        type=int,
+        default=1,
+        help="Number of parallel threads for processing features (default: 1 = sequential, recommended: 5-10 for speedup)"
+    )
+    parser.add_argument(
+        "--min-llm-threshold",
+        type=float,
+        default=0.5,
+        help="Minimum similarity score to warrant LLM evaluation (default: 0.5, candidates below this are auto-rejected)"
+    )
+    parser.add_argument(
         "--region",
         type=str,
         default="eu-central-1",
@@ -1357,6 +1475,8 @@ Examples:
             use_batch_evaluation=not args.no_batch,
             evaluate_all=not args.no_evaluate_all,
             skip_features_with_good_matches=args.skip_features_with_good_matches,
+            max_workers=args.max_workers,
+            min_llm_threshold=args.min_llm_threshold,
             log_level=log_level,
         )
 
