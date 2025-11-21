@@ -410,10 +410,18 @@ MOST candidates will NOT match - only TRUE technical equivalents deserve high sc
 **CRITICAL: DISQUALIFYING FACTORS** (Automatic LOW score if ANY apply):
 1. ❌ Different subsystems (Braking ≠ Infotainment, Powertrain ≠ Safety, Electrical ≠ Mechanical)
 2. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
-3. ❌ Different languages without clear translation (German ≠ English unless obvious equivalent)
-4. ❌ Different components (Rotors ≠ Pads, Engine ≠ Transmission, Display ≠ Camera)
-5. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior)
-6. ❌ Vague semantic similarity without functional equivalence
+3. ❌ Different components (Rotors ≠ Pads, Engine ≠ Transmission, Display ≠ Camera)
+4. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior)
+5. ❌ Vague semantic similarity without functional equivalence
+
+**MULTILINGUAL MATCHING**:
+✅ Features in different languages CAN match IF they are semantic equivalents
+✅ Examples of valid cross-language matches:
+   - "Motor" (German) = "Engine" (English) → Score 95-100 ✓
+   - "Bremsscheiben" (German) = "Brake Rotors" (English) → Score 95-100 ✓
+   - "Getriebe" (German) = "Transmission" (English) → Score 95-100 ✓
+✅ ALWAYS translate non-English terms to English in your reasoning
+✅ Score based on semantic/technical equivalence, NOT language difference
 
 **TARGET FEATURE**:
 Name: {target_feature_name}
@@ -425,30 +433,36 @@ Notes: {candidate.notes}
 OEM: {candidate.oem}
 
 **STRICT EVALUATION PROCESS**:
-Step 1: Identify target's subsystem (Powertrain, Braking, Safety, Infotainment, ADAS, Chassis, Body, Electrical, etc.)
-Step 2: For candidate:
+Step 1: Translate any non-English terms to English (e.g., "Netztrennwan" → "Network Separation Wall")
+Step 2: Identify target's subsystem (Powertrain, Braking, Safety, Infotainment, ADAS, Chassis, Body, Electrical, etc.)
+Step 3: For candidate:
    a) Does candidate belong to SAME subsystem? If NO → Score 0-20
    b) Does candidate serve SAME functional purpose? If NO → Score 0-30
    c) Are specifications compatible? If NO → Score 0-40
    d) Only if YES to all: Consider 70+ score
-Step 3: Apply conservative scoring
+Step 4: Apply conservative scoring
 
 **NEGATIVE EXAMPLES** (What NOT to match - Score 0-10):
-- "Brake Rotors" ≠ "Netztrennwan" (Braking ≠ Electrical, different subsystems)
+- "Brake Rotors" ≠ "Netztrennwan/Network Separation Wall" (Braking ≠ Electrical, different subsystems)
 - "Engine Capacity" ≠ "Torque" (Capacity ≠ Force, different measurements)
 - "Airbags" ≠ "Seat Belts" (Both safety, but different components)
 - "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions)
 - "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components)
 
-**SUBSYSTEM TAXONOMY** (Features must match subsystem):
-- Powertrain: Engine, Transmission, Drivetrain, Fuel System
-- Braking: Rotors, Pads, Calipers, ABS, Brake Assist
-- Safety: Airbags, Seat Belts, Collision Warning, Emergency Brake
-- Infotainment: Display, Audio, Navigation, Connectivity
+**POSITIVE CROSS-LANGUAGE EXAMPLES** (Score 95-100):
+- "Motor" (German) = "Engine" (English) → Same component, same subsystem ✓
+- "Bremsscheiben" (German) = "Brake Rotors" (English) → Same component, same subsystem ✓
+- "Hubraum" (German) = "Engine Displacement" (English) → Same measurement, same subsystem ✓
+
+**SUBSYSTEM TAXONOMY** (Features must match subsystem - with multilingual examples):
+- Powertrain: Engine/Motor, Transmission/Getriebe, Drivetrain, Fuel System, Displacement/Hubraum
+- Braking: Rotors/Bremsscheiben, Pads/Bremsbeläge, Calipers, ABS, Brake Assist
+- Safety: Airbags, Seat Belts/Sicherheitsgurte, Collision Warning, Emergency Brake
+- Infotainment: Display, Audio, Navigation, Connectivity, Media System
 - ADAS: Cameras, Sensors, Autopilot, Lane Assist, Parking Assist
-- Chassis: Suspension, Wheels, Tires, Steering
-- Electrical: Battery, Charging, Wiring, Fuses, Network Components
-- Body: Doors, Windows, Roof, Paint, Trim
+- Chassis: Suspension, Wheels/Räder, Tires/Reifen, Steering/Lenkung
+- Electrical: Battery/Batterie, Charging, Wiring, Fuses, Network Components/Netztrennwan
+- Body: Doors/Türen, Windows/Fenster, Roof/Dach, Paint/Lackierung, Trim
 
 **SCORING GUIDE** (VERY Conservative):
 - 95-100: IDENTICAL features (exact same component, just different wording)
@@ -479,8 +493,10 @@ Evaluate the candidate and provide your response as a JSON object with this exac
   "key_factors": ["factor1", "factor2", ...] // 1-5 factors
 }}
 
-IMPORTANT: Keep reasoning concise (2-3 sentences max, under 500 characters).
-Provide ONLY the JSON object, no additional text or formatting.
+IMPORTANT:
+- Keep reasoning concise (2-3 sentences max, under 500 characters)
+- ALWAYS translate non-English terms to English in your reasoning (e.g., "Netztrennwan (Network Separation Wall)")
+- Provide ONLY the JSON object, no additional text or formatting
 """
         return prompt
 
@@ -519,10 +535,18 @@ MOST candidates will NOT match - only TRUE technical equivalents deserve high sc
 **CRITICAL: DISQUALIFYING FACTORS** (Automatic LOW score if ANY apply):
 1. ❌ Different subsystems (Braking ≠ Infotainment, Powertrain ≠ Safety, Electrical ≠ Mechanical)
 2. ❌ Different measurement types (Torque ≠ Power, Weight ≠ Volume, Pressure ≠ Temperature)
-3. ❌ Different languages without clear translation (German ≠ English unless obvious equivalent)
-4. ❌ Different components (Rotors ≠ Pads, Engine ≠ Transmission, Display ≠ Camera)
-5. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior)
-6. ❌ Vague semantic similarity without functional equivalence
+3. ❌ Different components (Rotors ≠ Pads, Engine ≠ Transmission, Display ≠ Camera)
+4. ❌ Different vehicle systems (Body ≠ Chassis, Interior ≠ Exterior)
+5. ❌ Vague semantic similarity without functional equivalence
+
+**MULTILINGUAL MATCHING**:
+✅ Features in different languages CAN match IF they are semantic equivalents
+✅ Examples of valid cross-language matches:
+   - "Motor" (German) = "Engine" (English) → Score 95-100 ✓
+   - "Bremsscheiben" (German) = "Brake Rotors" (English) → Score 95-100 ✓
+   - "Getriebe" (German) = "Transmission" (English) → Score 95-100 ✓
+✅ ALWAYS translate non-English terms to English in your reasoning
+✅ Score based on semantic/technical equivalence, NOT language difference
 
 **TARGET FEATURE**:
 Name: {target_feature_name}
@@ -540,21 +564,26 @@ Step 2: For EACH candidate:
 Step 3: Apply conservative scoring
 
 **NEGATIVE EXAMPLES** (What NOT to match - Score 0-10):
-- "Brake Rotors" ≠ "Netztrennwan" (Braking ≠ Electrical, different subsystems)
+- "Brake Rotors" ≠ "Netztrennwan/Network Separation Wall" (Braking ≠ Electrical, different subsystems)
 - "Engine Capacity" ≠ "Torque" (Capacity ≠ Force, different measurements)
 - "Airbags" ≠ "Seat Belts" (Both safety, but different components)
 - "Navigation System" ≠ "Parking Sensors" (Both ADAS, but different functions)
 - "Leather Seats" ≠ "Leather Steering Wheel" (Both interior, but different components)
 
-**SUBSYSTEM TAXONOMY** (Features must match subsystem):
-- Powertrain: Engine, Transmission, Drivetrain, Fuel System
-- Braking: Rotors, Pads, Calipers, ABS, Brake Assist
-- Safety: Airbags, Seat Belts, Collision Warning, Emergency Brake
-- Infotainment: Display, Audio, Navigation, Connectivity
+**POSITIVE CROSS-LANGUAGE EXAMPLES** (Score 95-100):
+- "Motor" (German) = "Engine" (English) → Same component, same subsystem ✓
+- "Bremsscheiben" (German) = "Brake Rotors" (English) → Same component, same subsystem ✓
+- "Hubraum" (German) = "Engine Displacement" (English) → Same measurement, same subsystem ✓
+
+**SUBSYSTEM TAXONOMY** (Features must match subsystem - with multilingual examples):
+- Powertrain: Engine/Motor, Transmission/Getriebe, Drivetrain, Fuel System, Displacement/Hubraum
+- Braking: Rotors/Bremsscheiben, Pads/Bremsbeläge, Calipers, ABS, Brake Assist
+- Safety: Airbags, Seat Belts/Sicherheitsgurte, Collision Warning, Emergency Brake
+- Infotainment: Display, Audio, Navigation, Connectivity, Media System
 - ADAS: Cameras, Sensors, Autopilot, Lane Assist, Parking Assist
-- Chassis: Suspension, Wheels, Tires, Steering
-- Electrical: Battery, Charging, Wiring, Fuses, Network Components
-- Body: Doors, Windows, Roof, Paint, Trim
+- Chassis: Suspension, Wheels/Räder, Tires/Reifen, Steering/Lenkung
+- Electrical: Battery/Batterie, Charging, Wiring, Fuses, Network Components/Netztrennwan
+- Body: Doors/Türen, Windows/Fenster, Roof/Dach, Paint/Lackierung, Trim
 
 **SCORING GUIDE** (VERY Conservative):
 - 95-100: IDENTICAL features (exact same component, just different wording)
